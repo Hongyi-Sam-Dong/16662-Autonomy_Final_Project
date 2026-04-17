@@ -201,6 +201,14 @@
         <span>Dominoes placed:</span>
         <span id="domino-count">—</span>
     </div>
+    <div class="stat-row" style="margin-top:4px;padding-top:4px;border-top:none">
+        <span>Path length:</span>
+        <span id="path-length-stat">—</span>
+    </div>
+    <div class="stat-row" style="margin-top:4px;padding-top:4px;border-top:none">
+        <span>Avg face gap:</span>
+        <span id="path-gap-stat">—</span>
+    </div>
 </div>
 
 <div id="info-bar">Scroll to zoom &nbsp;|&nbsp; Drag to pan</div>
@@ -613,6 +621,32 @@
         ctx.lineWidth = 0.5 / scale;
         ctx.beginPath(); ctx.moveTo(-extent, 0); ctx.lineTo(extent, 0); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(0, -extent); ctx.lineTo(0, extent); ctx.stroke();
+
+        // 50×55 cm workspace boundary: 55 wide (x), 50 deep (y), near edge 25 cm from arm at ui_y=-38.5
+        const WS_HX = 27.5;               // half width (x): 55 cm
+        const WS_NEAR = -38.5 + 25;       // near edge y = -13.5 (25 cm from arm)
+        const WS_FAR  = WS_NEAR + 50;     // far edge y = 36.5
+        ctx.strokeStyle = 'rgba(80,220,80,0.45)';
+        ctx.lineWidth = 1.2 / scale;
+        ctx.setLineDash([5/scale, 3/scale]);
+        ctx.strokeRect(-WS_HX, WS_NEAR, WS_HX * 2, WS_FAR - WS_NEAR);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(80,220,80,0.55)';
+        ctx.font = `bold ${9/scale}px sans-serif`;
+        ctx.fillText('50×55 cm workspace', -WS_HX + 1.5/scale, WS_NEAR + 11/scale);
+
+        // Robot base position: robot(0,0) → ui_x=0, ui_y = -ROBOT_CX/UI_TO_M = -38.5
+        const robotUIX = 0, robotUIY = -38.5;
+        ctx.beginPath();
+        ctx.arc(robotUIX, robotUIY, 3.5/scale, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff3333';
+        ctx.fill();
+        ctx.strokeStyle = '#ff9999';
+        ctx.lineWidth = 0.6 / scale;
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,100,100,0.8)';
+        ctx.font = `bold ${9/scale}px sans-serif`;
+        ctx.fillText('robot', robotUIX + 5/scale, robotUIY + 3/scale);
     }
 
     function drawDomino(pt) {
@@ -649,6 +683,30 @@
         currentPath  = calculatePath();
         visibleCount = currentPath.length;
         uiCount.innerText = currentPath.length || '—';
+
+        // Path stats: total length + avg face-to-face gap (domino thickness = D_T = 3 cm)
+        const lenStat = document.getElementById('path-length-stat');
+        const gapStat = document.getElementById('path-gap-stat');
+        if (currentPath.length < 2) {
+            lenStat.innerText = '—'; gapStat.innerText = '—';
+            gapStat.style.color = '';
+        } else {
+            let total = 0;
+            for (let i = 1; i < currentPath.length; i++) {
+                const dx = currentPath[i].pos.x - currentPath[i-1].pos.x;
+                const dy = currentPath[i].pos.y - currentPath[i-1].pos.y;
+                total += Math.sqrt(dx*dx + dy*dy);
+            }
+            const avgCenter = total / (currentPath.length - 1);
+            const avgGap    = avgCenter - D_T;
+            lenStat.innerText = `${total.toFixed(1)} cm`;
+            gapStat.innerText = `${avgGap.toFixed(2)} cm`;
+            gapStat.style.color =
+                avgGap < 1   ? '#ff5a5a' :      // dangerously tight
+                avgGap < 3   ? '#ffb84d' :      // tight for chain reaction
+                               '#4fc3f7';       // healthy
+        }
+
         drawScene();
     }
 
@@ -680,10 +738,11 @@
 
     // Send to Robot
     // Coordinate mapping: UI units = cm, canvas y-down.
-    // 90° CCW rotation so horizontal UI path → forward robot path:
-    //   robot_x = CENTER_X - ui_y * scale   (canvas +y → robot -x)
-    //   robot_y = CENTER_Y + ui_x * scale   (canvas +x → robot +y)
-    //   robot_yaw = -ui_yaw + π/2
+    // UI convention: robot dot is drawn at world (0, -38.5) — top of canvas.
+    // Therefore canvas +Y (moving DOWN on screen) = moving AWAY from robot (robot_x ↑).
+    //   robot_x = CENTER_X + ui_y * UI_TO_M   (canvas +y → robot +x; away from base)
+    //   robot_y = CENTER_Y + ui_x * UI_TO_M   (canvas +x → robot +y; to robot's left)
+    //   robot_yaw = ui_yaw + π/2              (90° for UI→robot frame rotation)
     const ROBOT_CX = 0.385, ROBOT_CY = 0.0, UI_TO_M = 0.01;
 
     document.getElementById('btn-send').addEventListener('click', async () => {
@@ -693,11 +752,55 @@
         const btnStop  = document.getElementById('btn-stop');
         const btnReset = document.getElementById('btn-reset');
         btnSend.disabled = true; btnSend.textContent = '⏳ Sending...';
-        const positions = path.map(pt => ({
-            x:   ROBOT_CX + pt.pos.y * UI_TO_M,
-            y:   ROBOT_CY + pt.pos.x * UI_TO_M,
-            yaw:  pt.yaw + Math.PI/2
-        }));
+
+        // Auto-normalize custom path to workspace bounds before sending.
+        // If any point exceeds ui_x∈[-40,40] or ui_y∈[-15,15], scale the whole
+        // path down uniformly (preserving shape) so IK can always converge.
+        const WS_X = 40, WS_Y = 15;
+        let maxAbsX = 0, maxAbsY = 0;
+        path.forEach(pt => {
+            maxAbsX = Math.max(maxAbsX, Math.abs(pt.pos.x));
+            maxAbsY = Math.max(maxAbsY, Math.abs(pt.pos.y));
+        });
+        let normScale = 1;
+        if (maxAbsX > WS_X || maxAbsY > WS_Y) {
+            normScale = Math.min(WS_X / (maxAbsX || 1), WS_Y / (maxAbsY || 1));
+            console.warn(`Custom path out of workspace — auto-scaling by ${normScale.toFixed(3)}`);
+        }
+
+        // Replace the mapping logic inside the 'btn-send' event listener:
+        const positions = path.map(pt => {
+            // 1. Apply normalization scale
+            const sX = pt.pos.x * normScale;
+            const sY = pt.pos.y * normScale;
+
+            return {
+                // robot_x = CENTER_X + ui_y * UI_TO_M
+                // (canvas +Y = down on screen = away from the red robot dot at ui_y=-38.5)
+                x:   ROBOT_CX + (sY * UI_TO_M),
+                // robot_y = CENTER_Y + ui_x * UI_TO_M  (canvas +X = robot +Y, left side)
+                y:   ROBOT_CY + (sX * UI_TO_M),
+                // robot_yaw: +90° rotates UI frame into robot frame
+                yaw: pt.yaw + Math.PI / 2,
+
+                // Raw UI coords (cm, as drawn in the visualizer) for verification
+                ui_x:   sX,
+                ui_y:   sY,
+                ui_yaw: pt.yaw,
+            };
+        });
+
+        console.log(`Sending ${positions.length} domino positions:`);
+        console.table(positions.map((p, i) => ({
+            '#':      i + 1,
+            'UI_x':   p.ui_x.toFixed(2),
+            'UI_y':   p.ui_y.toFixed(2),
+            'UI_yaw': (p.ui_yaw * 180 / Math.PI).toFixed(1) + '°',
+            'SIM_x':  p.x.toFixed(4),
+            'SIM_y':  p.y.toFixed(4),
+            'SIM_yaw': (p.yaw * 180 / Math.PI).toFixed(1) + '°',
+        })));
+
         try {
             await fetch('/start', {
                 method: 'POST',

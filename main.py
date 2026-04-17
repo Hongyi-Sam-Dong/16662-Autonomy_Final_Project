@@ -189,31 +189,67 @@ def spawn_and_grasp(block_idx):
 
 
 def place_domino_standing(lift_q, target_xy, target_yaw):
+    """
+    為 Tina 修改後的版本：
+    1. 增加角度正規化，防止 joint7 報錯
+    2. 優化路徑銜接
+    """
     down_dir = np.array([0.0, 0.0, -1.0])
-
     placed_grasp_z = 0.235
 
+    # 定義路徑點
     transit_xyz  = np.array([target_xy[0], target_xy[1], 0.45])
-    preplace_xyz = np.array([target_xy[0], target_xy[1], placed_grasp_z + 0.15])
+    preplace_xyz = np.array([target_xy[0], target_xy[1], placed_grasp_z + 0.10]) # 稍微降低預放高度縮短時間
     place_xyz    = np.array([target_xy[0], target_xy[1], placed_grasp_z])
 
+    # 1. 解算 IK
     transit_q  = calculate_ik_6d(model, data, transit_xyz,  target_direction=down_dir, seed_q=lift_q)
     preplace_q = calculate_ik_6d(model, data, preplace_xyz, target_direction=down_dir, seed_q=transit_q)
     place_q    = calculate_ik_6d(model, data, place_xyz,    target_direction=down_dir, seed_q=preplace_q)
 
-    transit_q[6]  += target_yaw
-    preplace_q[6] += target_yaw
-    place_q[6]    += target_yaw
+    # 2. 角度正規化 + 方向選擇
+    # Dominoes are symmetric mod π (3×5 cm footprint looks identical when flipped 180°).
+    # So yaw and yaw+π are visually equivalent — pick whichever requires LESS joint7 motion
+    # AND is within Panda's joint7 limit (±2.8973 rad ≈ ±166°).
+    # This avoids huge sweeps (e.g. 170° → -190° long way) that knock over placed dominoes.
+    def normalize_angle(angle):
+        return (angle + np.pi) % (2 * np.pi) - np.pi
 
+    JOINT7_LIMIT = 2.8973
+    current_j7 = lift_q[6]  # starting joint7 angle
+    raw_j7 = place_q[6] + target_yaw
+    cand_a = normalize_angle(raw_j7)
+    cand_b = normalize_angle(raw_j7 + np.pi)   # 180°-flipped equivalent (same domino pose)
+
+    def score(c):
+        if abs(c) > JOINT7_LIMIT:
+            return float('inf')                # reject: outside joint limit
+        return abs(c - current_j7)             # prefer smallest motion
+
+    final_joint7 = min([cand_a, cand_b], key=score)
+    print(f"    joint7: current={np.degrees(current_j7):+.1f}° "
+          f"candidates=[{np.degrees(cand_a):+.1f}°, {np.degrees(cand_b):+.1f}°] "
+          f"→ chose {np.degrees(final_joint7):+.1f}° "
+          f"(Δ={np.degrees(final_joint7 - current_j7):+.1f}°)")
+
+    transit_q[6]  = final_joint7
+    preplace_q[6] = final_joint7
+    place_q[6]    = final_joint7
+
+    # 3. 執行動作
+    # 前往目標上方
     run_segment(lift_q,     transit_q,  GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
+    # 垂直下降
     run_segment(transit_q,  preplace_q, GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
     run_segment(preplace_q, place_q,    GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
 
+    # 鬆開夾爪
     run_segment(place_q,    place_q,    GRIPPER_OPEN,   hold_steps*2,  HOLD_DURATION*2)
     _carry["idx"] = None
+    
+    # 垂直撤離 (避免掃倒剛放好的骨牌)
     run_segment(place_q,    preplace_q, GRIPPER_OPEN,   segment_steps, SEGMENT_DURATION)
     run_segment(preplace_q, HOME_QPOS,  GRIPPER_OPEN,   segment_steps, SEGMENT_DURATION)
-
 
 MAX_DOMINOES = 60
 
@@ -271,6 +307,16 @@ if __name__ == "__main__":
             if n == 0:
                 continue
 
+            print(f"\n=== Domino plan ({n} dominoes) ===")
+            print(f"  {'#':>3}  {'UI_x':>8}  {'UI_y':>8}  {'UI_yaw':>8}  |  "
+                  f"{'SIM_x':>8}  {'SIM_y':>8}  {'SIM_yaw':>8}")
+            for i, p in enumerate(_ui_positions):
+                ui_x   = p.get('ui_x',   float('nan'))
+                ui_y   = p.get('ui_y',   float('nan'))
+                ui_yaw = p.get('ui_yaw', float('nan'))
+                print(f"  {i+1:>3}  {ui_x:>8.2f}  {ui_y:>8.2f}  {np.degrees(ui_yaw):>7.1f}°  |  "
+                      f"{p['x']:>8.4f}  {p['y']:>8.4f}  {np.degrees(p['yaw']):>7.1f}°")
+
             for i in range(MAX_DOMINOES):
                 set_block_pose(f"Domino_{i}", [HIDDEN_POS[0], HIDDEN_POS[1] + i*0.1, HIDDEN_POS[2]])
             mj.mj_forward(model, data)
@@ -279,7 +325,11 @@ if __name__ == "__main__":
             for i, (target_xy, target_yaw) in enumerate(domino_plan):
                 if _stop_event.is_set():
                     break
-                print(f"Placing Domino {i+1}/{n} | Yaw: {np.degrees(target_yaw):.1f}°")
+                ui_p = _ui_positions[i]
+                print(f"Placing {i+1}/{n} | "
+                      f"UI=({ui_p.get('ui_x', 0):.2f},{ui_p.get('ui_y', 0):.2f}) "
+                      f"SIM=({target_xy[0]:.4f},{target_xy[1]:.4f}) "
+                      f"yaw={np.degrees(target_yaw):.1f}°")
                 receive_q = spawn_and_grasp(i)
                 if _stop_event.is_set():
                     _carry["idx"] = None
