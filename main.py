@@ -189,11 +189,6 @@ def spawn_and_grasp(block_idx):
 
 
 def place_domino_standing(lift_q, target_xy, target_yaw):
-    """
-    為 Tina 修改後的版本：
-    1. 增加角度正規化，防止 joint7 報錯
-    2. 優化路徑銜接
-    """
     down_dir = np.array([0.0, 0.0, -1.0])
     placed_grasp_z = 0.235
 
@@ -281,7 +276,7 @@ def knock_first_domino_with_arm(first_xy, first_yaw, next_xy=None):
     # 2. 關鍵點：hand z=0.24 → 指尖 ~0.085（骨牌中段）
     strike_z = 0.24
     prep_xyz   = np.array([first_xy[0], first_xy[1], strike_z + 0.02]) - push_vec * 0.12
-    strike_xyz = np.array([first_xy[0], first_xy[1], strike_z])        + push_vec * 0.10
+    strike_xyz = np.array([first_xy[0], first_xy[1], strike_z])        + push_vec * 0.118
 
     # 3. 解算 IK（不再強設 joint7，保留 IK 自己收斂的解即可——推一下而已，夾爪朝向無關緊要）
     current_q = data.qpos[arm_idx].copy()

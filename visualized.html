@@ -230,6 +230,11 @@
     const D_W = 5, D_T = 3;
     const D_H = 15;                                 // cm, domino height (matches main.py DOMINO_HALF_SIZE[1]*2)
     const IDEAL_GAP = 7;
+
+    // Workspace center (UI cm). Workspace = [-22.5,22.5] × [-13.5,36.5] → center (0, 11.5).
+    // S-curve is generated around (0,0) then translated to sit at this center.
+    const WS_CENTER_X = 0;
+    const WS_CENTER_Y = 11.5;
     const CHAIN_RULES = {
         minCenterDist: D_T + 0.5,                   // error below  → ≥ 3.5 cm center-to-center
         maxFaceGap:    0.85 * D_H,                  // error above  → face-gap ≥ 12.75 cm (falling tip can't reach)
@@ -442,7 +447,7 @@
     function sCurvePoint(t, L, A, R) {
         const cx = L * t - L / 2, cy = A * Math.sin(2 * Math.PI * t);
         const c = Math.cos(R), s = Math.sin(R);
-        return { x: cx*c - cy*s, y: cx*s + cy*c };
+        return { x: cx*c - cy*s + WS_CENTER_X, y: cx*s + cy*c + WS_CENTER_Y };
     }
     function sCurveYaw(t, L, A, R) {
         return Math.atan((A * 2 * Math.PI * Math.cos(2 * Math.PI * t)) / L) + R;
@@ -727,8 +732,8 @@
         ctx.beginPath(); ctx.moveTo(-extent, 0); ctx.lineTo(extent, 0); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(0, -extent); ctx.lineTo(0, extent); ctx.stroke();
 
-        // 50×55 cm workspace boundary: 55 wide (x), 50 deep (y), near edge 25 cm from arm at ui_y=-38.5
-        const WS_HX = 27.5;               // half width (x): 55 cm
+        // 50×45 cm workspace boundary: 45 wide (x), 50 deep (y), near edge 25 cm from arm at ui_y=-38.5
+        const WS_HX = 22.5;               // half width (x): 45 cm
         const WS_NEAR = -38.5 + 25;       // near edge y = -13.5 (25 cm from arm)
         const WS_FAR  = WS_NEAR + 50;     // far edge y = 36.5
         ctx.strokeStyle = 'rgba(80,220,80,0.45)';
@@ -738,7 +743,7 @@
         ctx.setLineDash([]);
         ctx.fillStyle = 'rgba(80,220,80,0.55)';
         ctx.font = `bold ${9/scale}px sans-serif`;
-        ctx.fillText('50×55 cm workspace', -WS_HX + 1.5/scale, WS_NEAR + 11/scale);
+        ctx.fillText('50×45 cm workspace', -WS_HX + 1.5/scale, WS_NEAR + 11/scale);
 
         // Robot base position: robot(0,0) → ui_x=0, ui_y = -ROBOT_CX/UI_TO_M = -38.5
         const robotUIX = 0, robotUIY = -38.5;
@@ -878,9 +883,9 @@
         btnSend.disabled = true; btnSend.textContent = '⏳ Sending...';
 
         // Auto-normalize: only shrink if the path escapes the visible workspace
-        // (the green dashed box drawn in drawGrid). Matches 50×55 cm workspace:
-        // x ∈ [-27.5, 27.5],  y ∈ [-13.5, 36.5] (near edge 25 cm from arm).
-        const WS_XMIN = -27.5, WS_XMAX = 27.5;
+        // (the green dashed box drawn in drawGrid). Matches 50×45 cm workspace:
+        // x ∈ [-22.5, 22.5],  y ∈ [-13.5, 36.5] (near edge 25 cm from arm).
+        const WS_XMIN = -22.5, WS_XMAX = 22.5;
         const WS_YMIN = -13.5, WS_YMAX = 36.5;
         let bboxMaxX = 0, bboxMaxY = 0;  // worst-case "reach" beyond each edge
         path.forEach(pt => {
