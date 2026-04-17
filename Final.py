@@ -11,11 +11,8 @@ import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import webbrowser
 
-# ==========================================
-# 1. 基本設定與常數
-# ==========================================
-ROOT_MODEL_XML = "franka_emika_panda/panda_torque_table.xml" 
-MODEL_XML      = "franka_emika_panda/panda_torque_table_final.xml" 
+ROOT_MODEL_XML = "franka_emika_panda/panda_torque_table.xml"
+MODEL_XML      = "franka_emika_panda/panda_torque_table_final.xml"
 
 KP = np.array([120, 120, 100, 90, 60, 40, 30], dtype=float)
 KD = np.array([  8,   8,   6,  5,  4,  3,  2], dtype=float)
@@ -31,11 +28,8 @@ EndofTable = 0.55 + 0.135 + 0.05
 _ui_positions = []
 _start_event  = threading.Event()
 _stop_event   = threading.Event()
-_carry        = {"idx": None, "local_pos": None, "local_quat": None}
 
-# ==========================================
-# 2. Web UI 通訊伺服器
-# ==========================================
+
 class _UIHandler(BaseHTTPRequestHandler):
     def log_message(self, *_args): pass
 
@@ -69,9 +63,7 @@ class _UIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(resp)
 
-# ==========================================
-# 3. 核心控制函數 (IK & 軌跡執行)
-# ==========================================
+
 def calculate_ik_6d(model, data, target_pos, target_direction=None, target_quat=None,
                     body_name="hand", max_iters=500, tol=1e-3, step_size=0.2, seed_q=None):
     if target_direction is not None:
@@ -121,29 +113,12 @@ def calculate_ik_6d(model, data, target_pos, target_direction=None, target_quat=
     mj.mj_forward(model, data)
     return solved
 
+
 def run_segment(q_start, q_goal, gripper_pos, n_steps, duration):
     t = 0.0
-    hand_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "hand")
     for _ in range(n_steps):
         if _stop_event.is_set():
             return
-        
-        # 骨牌跟隨夾爪邏輯
-        if _carry["idx"] is not None:
-            h_pos  = data.xpos[hand_id].copy()
-            h_mat  = data.xmat[hand_id].reshape(3, 3)
-            h_quat = data.xquat[hand_id].copy()
-            
-            world_pos = h_pos + h_mat @ _carry["local_pos"]
-            world_quat = np.zeros(4)
-            mj.mju_mulQuat(world_quat, h_quat, _carry["local_quat"])
-            
-            body_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, _carry["idx"])
-            jnt_adr = model.body_jntadr[body_id]
-            q_adr   = model.jnt_qposadr[jnt_adr]
-            
-            data.qpos[q_adr:q_adr+3] = world_pos
-            data.qpos[q_adr+3:q_adr+7] = world_quat
 
         q_des, qd_des = rt.interp_min_jerk(q_start, q_goal, t, duration)
         q   = data.qpos[arm_idx].copy()
@@ -155,14 +130,8 @@ def run_segment(q_start, q_goal, gripper_pos, n_steps, duration):
         v.sync()
         t += dt
 
-# ==========================================
-# 4. 機器人任務模組 (抓取與放置)
-# ==========================================
+
 def pick_from_shelf_and_hold(block_name):
-    """
-    第一階段：從貨架取下方塊，並在夾緊瞬間記錄相對位置。
-    最後會回到 HOME_QPOS (此時夾爪朝下，骨牌會自動變成直立)。
-    """
     block_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, block_name)
     block_pos = data.xpos[block_id].copy()
 
@@ -180,48 +149,24 @@ def pick_from_shelf_and_hold(block_name):
         grasp_xyz    = block_pos + np.array([0.0, 0.15, 0.0])
         pullout_xyz  = block_pos + np.array([0.0, 0.40, 0.0])
 
-    # 計算 IK
     pregrasp_q = calculate_ik_6d(model, data, pregrasp_xyz, target_direction=side_dir, seed_q=HOME_QPOS)
     grasp_q    = calculate_ik_6d(model, data, grasp_xyz,    target_direction=side_dir, seed_q=pregrasp_q)
     pullout_q  = calculate_ik_6d(model, data, pullout_xyz,  target_direction=side_dir, seed_q=grasp_q)
 
-    # 修正手腕轉向
     pregrasp_q[6] -= np.pi / 2
     grasp_q[6]    -= np.pi / 2
     pullout_q[6]  -= np.pi / 2
 
-    # 執行軌跡
     run_segment(HOME_QPOS, pregrasp_q, GRIPPER_OPEN, segment_steps + hold_steps, SEGMENT_DURATION)
     run_segment(pregrasp_q, grasp_q,   GRIPPER_OPEN, segment_steps + hold_steps, SEGMENT_DURATION)
-    
-    # 夾緊前先暫停
+
     run_segment(grasp_q, grasp_q, GRIPPER_CLOSED, hold_steps * 2, HOLD_DURATION * 2)
 
-    # 關鍵：動態記錄抓取時的相對位置與旋轉，確保之後姿態不會亂掉
-    hand_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "hand")
-    h_pos  = data.xpos[hand_id].copy()
-    h_mat  = data.xmat[hand_id].reshape(3, 3)
-    h_quat = data.xquat[hand_id].copy()
-    b_pos  = data.xpos[block_id].copy()
-    b_quat = data.xquat[block_id].copy()
-    
-    local_pos = h_mat.T @ (b_pos - h_pos)
-    h_quat_inv = np.array([h_quat[0], -h_quat[1], -h_quat[2], -h_quat[3]])
-    local_quat = np.zeros(4)
-    mj.mju_mulQuat(local_quat, h_quat_inv, b_quat)
-
-    _carry["idx"] = block_name
-    _carry["local_pos"] = local_pos
-    _carry["local_quat"] = local_quat
-
-    # 拔出貨架並回到 HOME (此時骨牌會跟著夾爪轉為直立)
     run_segment(grasp_q, pullout_q, GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
     run_segment(pullout_q, HOME_QPOS, GRIPPER_CLOSED, segment_steps + hold_steps, SEGMENT_DURATION)
 
+
 def place_domino_standing(target_xy, target_yaw):
-    """
-    第二階段：從 HOME_QPOS 出發，將夾著的骨牌直立放置在 UI 指定位置，然後鬆開回到 HOME。
-    """
     down_dir = np.array([0.0, 0.0, -1.0])
     placed_grasp_z = 0.235
 
@@ -252,21 +197,17 @@ def place_domino_standing(target_xy, target_yaw):
     preplace_q[6] = final_joint7
     place_q[6]    = final_joint7
 
-    # 執行放置動作
     run_segment(HOME_QPOS,  transit_q,  GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
     run_segment(transit_q,  preplace_q, GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
     run_segment(preplace_q, place_q,    GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
 
-    # 鬆開夾爪並解除 _carry 綁定
     run_segment(place_q, place_q, GRIPPER_OPEN, hold_steps*2, HOLD_DURATION*2)
-    _carry["idx"] = None
-    
-    # 垂直撤離並回到 Home
+
     run_segment(place_q, preplace_q, GRIPPER_OPEN, segment_steps, SEGMENT_DURATION)
     run_segment(preplace_q, HOME_QPOS, GRIPPER_OPEN, segment_steps, SEGMENT_DURATION)
 
+
 def knock_first_domino_with_arm(first_xy, first_yaw, next_xy=None):
-    """ 擊倒骨牌觸發連鎖反應 """
     down_dir = np.array([0.0, 0.0, -1.0])
 
     if next_xy is not None:
@@ -277,31 +218,37 @@ def knock_first_domino_with_arm(first_xy, first_yaw, next_xy=None):
     else:
         push_vec = np.array([-np.cos(first_yaw), np.sin(first_yaw), 0.0])
 
-    strike_z = 0.24
-    prep_xyz   = np.array([first_xy[0], first_xy[1], strike_z + 0.02]) - push_vec * 0.12
-    strike_xyz = np.array([first_xy[0], first_xy[1], strike_z])        + push_vec * 0.10
+    placed_grasp_z = 0.235
 
-    current_q = data.qpos[arm_idx].copy()
-    prep_q   = calculate_ik_6d(model, data, prep_xyz,   target_direction=down_dir, seed_q=current_q)
-    strike_q = calculate_ik_6d(model, data, strike_xyz, target_direction=down_dir, seed_q=prep_q)
+    transit_xyz  = np.array([first_xy[0], first_xy[1], 0.45])
+    preplace_xyz = np.array([first_xy[0], first_xy[1], placed_grasp_z + 0.10])
+    prep_xyz     = np.array([first_xy[0] - push_vec[0] * 0.01,
+                             first_xy[1] - push_vec[1] * 0.01,
+                             placed_grasp_z])
+    strike_xyz   = np.array([first_xy[0], first_xy[1], placed_grasp_z])
 
-    print("Moving arm to strike position...")
-    run_segment(current_q, prep_q,   GRIPPER_CLOSED, segment_steps,     SEGMENT_DURATION)
-    print("Striking!!!")
-    run_segment(prep_q,    strike_q, GRIPPER_CLOSED, segment_steps // 3, SEGMENT_DURATION / 3)
-    run_segment(strike_q,  strike_q, GRIPPER_CLOSED, hold_steps,        HOLD_DURATION)
-    run_segment(strike_q,  HOME_QPOS, GRIPPER_CLOSED, segment_steps,    SEGMENT_DURATION)
+    current_q  = data.qpos[arm_idx].copy()
+    transit_q  = calculate_ik_6d(model, data, transit_xyz,  target_direction=down_dir, seed_q=current_q)
+    preplace_q = calculate_ik_6d(model, data, preplace_xyz, target_direction=down_dir, seed_q=transit_q)
+    prep_q     = calculate_ik_6d(model, data, prep_xyz,     target_direction=down_dir, seed_q=preplace_q)
+    strike_q   = calculate_ik_6d(model, data, strike_xyz,   target_direction=down_dir, seed_q=prep_q)
 
-# ==========================================
-# 5. 系統主程式
-# ==========================================
+    print("Moving arm above first domino...")
+    run_segment(current_q,  transit_q,  GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
+    run_segment(transit_q,  preplace_q, GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
+    run_segment(preplace_q, prep_q,     GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
+    print("Gentle nudge (1 cm)!")
+    run_segment(prep_q,     strike_q,   GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
+    run_segment(strike_q,   strike_q,   GRIPPER_CLOSED, hold_steps,    HOLD_DURATION)
+    run_segment(strike_q,   preplace_q, GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
+    run_segment(preplace_q, HOME_QPOS,  GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
+
+
 if __name__ == "__main__":
     np.random.seed(13)
-    
-    # 建立模型與貨架方塊
+
     modelTree = ET.parse(ROOT_MODEL_XML)
-    
-    # --- 載入 SimpleScript 中的貨架定義 ---
+
     BLOCKS=[
         ["TablePlane",[EndofTable-0.275,0.,-0.005],[0.275, 0.504, 0.0051]],
         ["LShelfDistal",[EndofTable-0.09-0.0225, 0.504-0.045-0.0225, 0.315],[0.0225, 0.0225, 0.315]],
@@ -384,7 +331,6 @@ if __name__ == "__main__":
 
     modelTree.write(MODEL_XML, encoding="utf-8", xml_declaration=True)
 
-    # 啟動伺服器與模擬器
     server = HTTPServer(('localhost', 5000), _UIHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print("Open http://localhost:5000 — arrange dominoes, then click 'Start Placing'")
@@ -409,16 +355,19 @@ if __name__ == "__main__":
     v.cam.azimuth += 90
     v.sync()
 
-    # 定義要從貨架上拿取的順序
     block_order = [
-        "RBottomFar3", "RBottomFar2", "RBottomFar1",
-        "RBottomClose3", "RBottomClose2", "RBottomClose1",
+        "RBottomFar3",
+        "RBottomClose3",
         "RMiddleFar3", "RMiddleFar2", "RMiddleFar1",
         "RMiddleClose3", "RMiddleClose2", "RMiddleClose1",
         "RTopFar3", "RTopFar2", "RTopFar1",
         "RTopClose3", "RTopClose2", "RTopClose1",
-        "LBottomClose3", "LBottomClose2", "LBottomClose1",
-        "LBottomFar3", "LBottomFar2", "LBottomFar1",
+        "LBottomClose3",
+        "LBottomFar3",
+        "RBottomFar2", "RBottomFar1",
+        "RBottomClose2", "RBottomClose1",
+        "LBottomClose2", "LBottomClose1",
+        "LBottomFar2", "LBottomFar1",
     ]
 
     try:
@@ -434,27 +383,23 @@ if __name__ == "__main__":
             if n == 0: continue
 
             print(f"\n=== Starting Domino Assembly ({n} dominoes) ===")
-            
+
             for i, (target_xy, target_yaw) in enumerate(domino_plan):
                 if _stop_event.is_set() or i >= len(block_order):
                     break
-                
+
                 block_name = block_order[i]
                 print(f"[{i+1}/{n}] Picking {block_name} from shelf...")
-                
-                # 第一階段：去貨架上抓取並回到 Home
+
                 pick_from_shelf_and_hold(block_name)
-                
+
                 if _stop_event.is_set():
-                    _carry["idx"] = None
                     break
-                
-                # 第二階段：從 Home 出發放置到指定位置
+
                 print(f"        Placing at UI=({_ui_positions[i].get('ui_x', 0):.2f}, {_ui_positions[i].get('ui_y', 0):.2f})")
                 place_domino_standing(target_xy, target_yaw)
 
             if _stop_event.is_set():
-                _carry["idx"] = None
                 print("\nStopped — returning home...")
                 run_segment(data.qpos[arm_idx], HOME_QPOS, GRIPPER_OPEN, segment_steps, SEGMENT_DURATION)
             else:
