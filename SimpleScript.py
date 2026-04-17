@@ -239,13 +239,13 @@ if __name__ == "__main__":
     left_pile1_x = EndofTable - 0.135 - 0.15
     left_pile2_x = (EndofTable - 0.135 - 2 * 0.2525) + 0.15
 
-    rt.add_free_block_to_model(tree=modelTree, name="Block1",  pos=[left_pile1_x, left_shelf_y, left_shelf_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="Block2", pos=[left_pile1_x, left_shelf_y, left_shelf_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="Block3", pos=[left_pile1_x, left_shelf_y, left_shelf_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
+    rt.add_free_block_to_model(tree=modelTree, name="LBottomFar1",   pos=[left_pile1_x, left_shelf_y, left_shelf_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
+    rt.add_free_block_to_model(tree=modelTree, name="LBottomFar2",   pos=[left_pile1_x, left_shelf_y, left_shelf_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
+    rt.add_free_block_to_model(tree=modelTree, name="LBottomFar3",   pos=[left_pile1_x, left_shelf_y, left_shelf_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
 
-    rt.add_free_block_to_model(tree=modelTree, name="Block4", pos=[left_pile2_x, left_shelf_y, left_shelf_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="Block5", pos=[left_pile2_x, left_shelf_y, left_shelf_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="Block6", pos=[left_pile2_x, left_shelf_y, left_shelf_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
+    rt.add_free_block_to_model(tree=modelTree, name="LBottomClose1", pos=[left_pile2_x, left_shelf_y, left_shelf_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
+    rt.add_free_block_to_model(tree=modelTree, name="LBottomClose2", pos=[left_pile2_x, left_shelf_y, left_shelf_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
+    rt.add_free_block_to_model(tree=modelTree, name="LBottomClose3", pos=[left_pile2_x, left_shelf_y, left_shelf_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
 
     right_far_x = EndofTable - 0.135 - 0.15
     right_close_x = (EndofTable - 0.135 - 2 * 0.2525) + 0.15
@@ -311,8 +311,8 @@ if __name__ == "__main__":
         "RMiddleClose3", "RMiddleClose2", "RMiddleClose1",
         "RTopFar3", "RTopFar2", "RTopFar1",
         "RTopClose3", "RTopClose2", "RTopClose1",
-        "Block6", "Block5", "Block4",
-        "Block3", "Block2", "Block1",
+        "LBottomClose3", "LBottomClose2", "LBottomClose1",
+        "LBottomFar3", "LBottomFar2", "LBottomFar1",
     ]
 
     block_ids = {
@@ -325,37 +325,49 @@ if __name__ == "__main__":
         print(f"{block_name} position: {data.xpos[block_ids[block_name]].copy()}")
 
     home_qpos = WAYPOINTS[0][:7].copy()
+    left_side_dir = np.array([0.0, 1.0, 0.0])
     right_side_dir = np.array([0.0, -1.0, 0.0])
 
-    def plan_side_pick(block_id):
+    def plan_side_pick(block_name, block_id):
         data.qpos[arm_idx] = home_qpos
         data.qvel[arm_idx] = 0.0
         mj.mj_forward(model, data)
 
         block_pos = data.xpos[block_id].copy()
-        pregrasp_xyz = block_pos + np.array([0.0, 0.20, 0.0])
-        grasp_xyz    = block_pos + np.array([0.0, 0.15, 0.0])
-        pullout_xyz  = block_pos + np.array([0.0, 0.40, 0.0])
-        lift_xyz     = block_pos + np.array([0.0, 0.30, 0.30])
 
-        pregrasp_q = calculate_ik_6d(model, data, pregrasp_xyz, target_direction=right_side_dir)
-        grasp_q    = calculate_ik_6d(model, data, grasp_xyz,    target_direction=right_side_dir)
-        pullout_q  = calculate_ik_6d(model, data, pullout_xyz,  target_direction=right_side_dir)
-        # lift_q     = calculate_ik_6d(model, data, lift_xyz,     target_direction=right_side_dir)
+        if block_name.startswith("L"):
+            side_dir = left_side_dir
+            pregrasp_xyz = block_pos + np.array([0.0, -0.20, 0.0])
+            grasp_xyz    = block_pos + np.array([0.0, -0.15, 0.0])
+            lift_xyz     = grasp_xyz + np.array([0.0, 0.0, 0.02])
+            pullout_xyz  = block_pos + np.array([0.0, -0.40, 0.0])
+        else:
+            side_dir = right_side_dir
+            pregrasp_xyz = block_pos + np.array([0.0, 0.20, 0.0])
+            grasp_xyz    = block_pos + np.array([0.0, 0.15, 0.0])
+            lift_xyz     = grasp_xyz + np.array([0.0, 0.0, 0.02])
+            pullout_xyz  = block_pos + np.array([0.0, 0.40, 0.0])
+
+        pregrasp_q = calculate_ik_6d(model, data, pregrasp_xyz, target_direction=side_dir)
+        grasp_q    = calculate_ik_6d(model, data, grasp_xyz,    target_direction=side_dir)
+        lift_q     = calculate_ik_6d(model, data, lift_xyz,     target_direction=side_dir)
+        pullout_q  = calculate_ik_6d(model, data, pullout_xyz,  target_direction=side_dir)
 
         pregrasp_q[6] -= np.pi / 2
         grasp_q[6]    -= np.pi / 2
+        lift_q[6]     -= np.pi / 2
         pullout_q[6]  -= np.pi / 2
 
-        return pregrasp_q, grasp_q, pullout_q
+        return pregrasp_q, grasp_q, lift_q, pullout_q
 
     def pick_lift_return_release(block_name, block_id):
-        pregrasp_q, grasp_q, pullout_q= plan_side_pick(block_id)
+        pregrasp_q, grasp_q, lift_q, pullout_q = plan_side_pick(block_name, block_id)
 
         print(f"start {block_name} pick up")
         run_segment(home_qpos,   pregrasp_q, 0.04, segment_steps + hold_steps, SEGMENT_DURATION)
         run_segment(pregrasp_q,  grasp_q,    0.04, segment_steps + hold_steps, SEGMENT_DURATION)
-        run_segment(grasp_q,     pullout_q,  0.0,  segment_steps + hold_steps, SEGMENT_DURATION)
+        run_segment(grasp_q,     lift_q,     0.0,  segment_steps + hold_steps, SEGMENT_DURATION)
+        run_segment(lift_q,      pullout_q,  0.0,  segment_steps + hold_steps, SEGMENT_DURATION)
         run_segment(pullout_q,  home_qpos, 0.0, segment_steps + hold_steps, SEGMENT_DURATION)
         run_segment(home_qpos, home_qpos, 0.0, hold_steps, HOLD_DURATION)
         run_segment(home_qpos, home_qpos, 0.04, hold_steps, HOLD_DURATION)
