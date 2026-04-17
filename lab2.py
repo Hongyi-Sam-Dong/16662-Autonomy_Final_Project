@@ -230,54 +230,10 @@ if __name__ == "__main__":
     for i in range(len(BLOCKS)):
         rt.add_free_block_to_model(tree=modelTree, name=BLOCKS[i][0], pos=BLOCKS[i][1], density= 20 , size=BLOCKS[i][2] , rgba=[0.2, 0.2, 0.9, 1],free=False)
 
-    box_size = [0.025, 0.075, 0.015]
-    box_rgba = [0.0, 0.9, 0.2, 1.0]
-
-    left_shelf_y = 0.504 - 0.09 - 0.135 / 2.0
-    left_shelf_top_z = 0.1375 + 0.005 + 0.005
-
-    left_pile1_x = EndofTable - 0.135 - 0.15
-    left_pile2_x = (EndofTable - 0.135 - 2 * 0.2525) + 0.15
-
-    rt.add_free_block_to_model(tree=modelTree, name="Block1",  pos=[left_pile1_x, left_shelf_y, left_shelf_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="Block2", pos=[left_pile1_x, left_shelf_y, left_shelf_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="Block3", pos=[left_pile1_x, left_shelf_y, left_shelf_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
-
-    rt.add_free_block_to_model(tree=modelTree, name="Block4", pos=[left_pile2_x, left_shelf_y, left_shelf_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="Block5", pos=[left_pile2_x, left_shelf_y, left_shelf_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="Block6", pos=[left_pile2_x, left_shelf_y, left_shelf_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
-
-    right_far_x = EndofTable - 0.135 - 0.15
-    right_close_x = (EndofTable - 0.135 - 2 * 0.2525) + 0.15
-    right_shelf_y = -0.504 + 0.09 + 0.135 / 2.0
-
-    rshelf_bottom_top_z = 0.1375 + 0.005 + 0.005
-    rshelf_middle_top_z = 0.1375 + 0.005 + 0.2 + 0.005
-    rshelf_top_top_z = 0.1375 + 0.005 + 0.4 + 0.005
-
-    rt.add_free_block_to_model(tree=modelTree, name="RBottomFar1",   pos=[right_far_x,   right_shelf_y, rshelf_bottom_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RBottomFar2",   pos=[right_far_x,   right_shelf_y, rshelf_bottom_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RBottomFar3",   pos=[right_far_x,   right_shelf_y, rshelf_bottom_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
-
-    rt.add_free_block_to_model(tree=modelTree, name="RBottomClose1", pos=[right_close_x, right_shelf_y, rshelf_bottom_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RBottomClose2", pos=[right_close_x, right_shelf_y, rshelf_bottom_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RBottomClose3", pos=[right_close_x, right_shelf_y, rshelf_bottom_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
-
-    rt.add_free_block_to_model(tree=modelTree, name="RMiddleFar1",   pos=[right_far_x,   right_shelf_y, rshelf_middle_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RMiddleFar2",   pos=[right_far_x,   right_shelf_y, rshelf_middle_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RMiddleFar3",   pos=[right_far_x,   right_shelf_y, rshelf_middle_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
-
-    rt.add_free_block_to_model(tree=modelTree, name="RMiddleClose1", pos=[right_close_x, right_shelf_y, rshelf_middle_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RMiddleClose2", pos=[right_close_x, right_shelf_y, rshelf_middle_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RMiddleClose3", pos=[right_close_x, right_shelf_y, rshelf_middle_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
-
-    rt.add_free_block_to_model(tree=modelTree, name="RTopFar1",      pos=[right_far_x,   right_shelf_y, rshelf_top_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RTopFar2",      pos=[right_far_x,   right_shelf_y, rshelf_top_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RTopFar3",      pos=[right_far_x,   right_shelf_y, rshelf_top_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
-
-    rt.add_free_block_to_model(tree=modelTree, name="RTopClose1",    pos=[right_close_x, right_shelf_y, rshelf_top_top_z + 0.015], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RTopClose2",    pos=[right_close_x, right_shelf_y, rshelf_top_top_z + 0.045], density=20, size=box_size, rgba=box_rgba, free=True)
-    rt.add_free_block_to_model(tree=modelTree, name="RTopClose3",    pos=[right_close_x, right_shelf_y, rshelf_top_top_z + 0.075], density=20, size=box_size, rgba=box_rgba, free=True)
+    #Add free blocks to manipulate
+    rt.add_free_block_to_model(tree=modelTree, name="Block",  pos=[EndofTable-0.145,  0.0,  0.05], density=20, size=[0.02, 0.02, 0.02], rgba=[0.0, 0.9, 0.2, 1], free=True)
+    rt.add_free_block_to_model(tree=modelTree, name="Block2", pos=[EndofTable-0.145,  0.1,  0.05], density=20, size=[0.02, 0.02, 0.02], rgba=[0.9, 0.2, 0.2, 1], free=True)
+    rt.add_free_block_to_model(tree=modelTree, name="Block3", pos=[EndofTable-0.145, -0.1,  0.05], density=20, size=[0.02, 0.02, 0.02], rgba=[0.9, 0.9, 0.0, 1], free=True)
 
     modelTree.write(MODEL_XML, encoding="utf-8", xml_declaration=True)
     
@@ -304,70 +260,78 @@ if __name__ == "__main__":
     v.cam.distance=3.0 
     v.cam.azimuth += 90                     
     
-    block_order = [
-        "RBottomFar3", "RBottomFar2", "RBottomFar1",
-        "RBottomClose3", "RBottomClose2", "RBottomClose1",
-        "RMiddleFar3", "RMiddleFar2", "RMiddleFar1",
-        "RMiddleClose3", "RMiddleClose2", "RMiddleClose1",
-        "RTopFar3", "RTopFar2", "RTopFar1",
-        "RTopClose3", "RTopClose2", "RTopClose1",
-        "Block6", "Block5", "Block4",
-        "Block3", "Block2", "Block1",
-    ]
+    # Grip info
+    block_id  = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "Block")
+    block2_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "Block2")
+    block3_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "Block3")
+    block_pos = data.xpos[block_id]
+    block_pos2 = data.xpos[block2_id]
+    block_pos3 = data.xpos[block3_id]
+    hand_id   = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "hand")
+    # print block positions
+    print(f"Block 1 position: {block_pos}")
+    print(f"Block 2 position: {block_pos2}")
+    print(f"Block 3 position: {block_pos3}")
 
-    block_ids = {
-        block_name: mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, block_name)
-        for block_name in block_order
-    }
-
+    # for first block
+    down_dir = np.array([0.0, 0.0, -1.0])   
     mj.mj_forward(model, data)
-    for block_name in block_order:
-        print(f"{block_name} position: {data.xpos[block_ids[block_name]].copy()}")
+    block_pos = data.xpos[block_id].copy()
+    pregrasp_xyz = block_pos + np.array([0.0, 0.0, 0.13])
+    grasp_xyz    = block_pos + np.array([0.0, 0.0, 0.08])
+    lift_xyz     = block_pos + np.array([0.0, 0.0, 0.35])
 
     home_qpos = WAYPOINTS[0][:7].copy()
-    right_side_dir = np.array([0.0, -1.0, 0.0])
+    data.qpos[arm_idx] = home_qpos
 
-    def plan_side_pick(block_id):
-        data.qpos[arm_idx] = home_qpos
-        data.qvel[arm_idx] = 0.0
-        mj.mj_forward(model, data)
+    pregrasp_q = calculate_ik_6d(model, data, pregrasp_xyz, target_direction=down_dir)
+    grasp_q    = calculate_ik_6d(model, data, grasp_xyz,    target_direction=down_dir)
+    lift_q     = calculate_ik_6d(model, data, lift_xyz,     target_direction=down_dir)
 
-        block_pos = data.xpos[block_id].copy()
-        pregrasp_xyz = block_pos + np.array([0.0, 0.20, 0.0])
-        grasp_xyz    = block_pos + np.array([0.0, 0.15, 0.0])
-        pullout_xyz  = block_pos + np.array([0.0, 0.40, 0.0])
-        lift_xyz     = block_pos + np.array([0.0, 0.30, 0.30])
+    # for second block
+    mj.mj_forward(model, data)
+    block_pos2 = data.xpos[block2_id].copy()
+    pregrasp_xyz2 = block_pos2 + np.array([0.0, 0.0, 0.13])
+    grasp_xyz2    = block_pos2 + np.array([0.0, 0.0, 0.08])
+    lift_xyz2     = block_pos2 + np.array([0.0, 0.0, 0.35])
 
-        pregrasp_q = calculate_ik_6d(model, data, pregrasp_xyz, target_direction=right_side_dir)
-        grasp_q    = calculate_ik_6d(model, data, grasp_xyz,    target_direction=right_side_dir)
-        pullout_q  = calculate_ik_6d(model, data, pullout_xyz,  target_direction=right_side_dir)
-        # lift_q     = calculate_ik_6d(model, data, lift_xyz,     target_direction=right_side_dir)
+    pregrasp_q2 = calculate_ik_6d(model, data, pregrasp_xyz2, target_direction=down_dir)
+    grasp_q2    = calculate_ik_6d(model, data, grasp_xyz2,    target_direction=down_dir)
+    lift_q2     = calculate_ik_6d(model, data, lift_xyz2,     target_direction=down_dir)
 
-        pregrasp_q[6] -= np.pi / 2
-        grasp_q[6]    -= np.pi / 2
-        pullout_q[6]  -= np.pi / 2
+    # for third block
+    mj.mj_forward(model, data)
+    block_pos3 = data.xpos[block3_id].copy()
+    pregrasp_xyz3 = block_pos3 + np.array([0.0, 0.0, 0.13])
+    grasp_xyz3    = block_pos3 + np.array([0.0, 0.0, 0.08])
+    lift_xyz3     = block_pos3 + np.array([0.0, 0.0, 0.35])
 
-        return pregrasp_q, grasp_q, pullout_q
-
-    def pick_lift_return_release(block_name, block_id):
-        pregrasp_q, grasp_q, pullout_q= plan_side_pick(block_id)
-
-        print(f"start {block_name} pick up")
-        run_segment(home_qpos,   pregrasp_q, 0.04, segment_steps + hold_steps, SEGMENT_DURATION)
-        run_segment(pregrasp_q,  grasp_q,    0.04, segment_steps + hold_steps, SEGMENT_DURATION)
-        run_segment(grasp_q,     pullout_q,  0.0,  segment_steps + hold_steps, SEGMENT_DURATION)
-        run_segment(pullout_q,  home_qpos, 0.0, segment_steps + hold_steps, SEGMENT_DURATION)
-        run_segment(home_qpos, home_qpos, 0.0, hold_steps, HOLD_DURATION)
-        run_segment(home_qpos, home_qpos, 0.04, hold_steps, HOLD_DURATION)
-        print(f"Task complete - {block_name} picked, lifted, returned to neutral, and released")
+    pregrasp_q3 = calculate_ik_6d(model, data, pregrasp_xyz3, target_direction=down_dir)
+    grasp_q3    = calculate_ik_6d(model, data, grasp_xyz3,    target_direction=down_dir)
+    lift_q3     = calculate_ik_6d(model, data, lift_xyz3,     target_direction=down_dir)
 
     try:
         data.qpos[arm_idx] = home_qpos
         data.qvel[arm_idx] = 0.0
         mj.mj_forward(model, data)
 
-        for block_name in block_order:
-            pick_lift_return_release(block_name, block_ids[block_name])
+        print("start first block pick up")
+        pick_from_table(pregrasp_q, grasp_q, lift_q)
+        relift_q = place_left_and_regrasp(lift_q)
+        place_on_right_shelf(relift_q, "RShelfMiddle")
+        print("Task complete — Block1 placed on RShelfMiddle")
+
+        print("start second block placement")
+        pick_from_table(pregrasp_q2, grasp_q2, lift_q2)
+        relift_q2 = place_left_and_regrasp(lift_q2)
+        place_on_right_shelf(relift_q2, "RShelfBottom", z_offset=0.005)
+        print("Task complete — Block2 placed on RShelfBottom")
+
+        print("start third block placement")
+        pick_from_table(pregrasp_q3, grasp_q3, lift_q3)
+        relift_q3 = place_left_and_regrasp(lift_q3)
+        place_on_right_shelf(relift_q3, "RShelfTop")
+        print("Task complete — all three blocks placed on right shelf")
 
     finally:
         v.close()
