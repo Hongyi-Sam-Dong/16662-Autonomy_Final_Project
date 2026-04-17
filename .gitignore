@@ -1,3 +1,6 @@
 /__pycache__
 /mujoco_env
 /.codex
+/build
+/install
+/log
