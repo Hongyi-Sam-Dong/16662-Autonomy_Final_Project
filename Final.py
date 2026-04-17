@@ -163,7 +163,7 @@ def pick_from_shelf_and_hold(block_name):
     run_segment(grasp_q, grasp_q, GRIPPER_CLOSED, hold_steps * 2, HOLD_DURATION * 2)
 
     run_segment(grasp_q, pullout_q, GRIPPER_CLOSED, segment_steps, SEGMENT_DURATION)
-    run_segment(pullout_q, HOME_QPOS, GRIPPER_CLOSED, segment_steps + hold_steps, SEGMENT_DURATION)
+    run_segment(pullout_q, HOME_QPOS, GRIPPER_CLOSED, segment_steps + hold_steps*2, SEGMENT_DURATION)
 
 
 def place_domino_standing(target_xy, target_yaw):
@@ -210,22 +210,27 @@ def place_domino_standing(target_xy, target_yaw):
 def knock_first_domino_with_arm(first_xy, first_yaw, next_xy=None):
     down_dir = np.array([0.0, 0.0, -1.0])
 
+    push_vec = np.array([-np.cos(first_yaw), np.sin(first_yaw), 0.0])
     if next_xy is not None:
         delta = np.asarray(next_xy, dtype=float) - np.asarray(first_xy, dtype=float)
-        n = np.linalg.norm(delta)
-        push_vec = (np.array([delta[0] / n, delta[1] / n, 0.0]) if n > 1e-6
-                    else np.array([-np.cos(first_yaw), np.sin(first_yaw), 0.0]))
-    else:
-        push_vec = np.array([-np.cos(first_yaw), np.sin(first_yaw), 0.0])
+        if push_vec[0] * delta[0] + push_vec[1] * delta[1] < 0:
+            push_vec = -push_vec
 
     placed_grasp_z = 0.235
 
     transit_xyz  = np.array([first_xy[0], first_xy[1], 0.45])
     preplace_xyz = np.array([first_xy[0], first_xy[1], placed_grasp_z + 0.10])
-    prep_xyz     = np.array([first_xy[0] - push_vec[0] * 0.01,
-                             first_xy[1] - push_vec[1] * 0.01,
+    prep_xyz     = np.array([first_xy[0] - push_vec[0] * 0.02,
+                             first_xy[1] - push_vec[1] * 0.02,
                              placed_grasp_z])
-    strike_xyz   = np.array([first_xy[0], first_xy[1], placed_grasp_z])
+    if next_xy is not None:
+        strike_xyz = np.array([(first_xy[0] + next_xy[0]) / 2.0,
+                               (first_xy[1] + next_xy[1]) / 2.0,
+                               placed_grasp_z])
+    else:
+        strike_xyz = np.array([first_xy[0] + push_vec[0] * 0.04,
+                               first_xy[1] + push_vec[1] * 0.04,
+                               placed_grasp_z+0.01])
 
     current_q  = data.qpos[arm_idx].copy()
     transit_q  = calculate_ik_6d(model, data, transit_xyz,  target_direction=down_dir, seed_q=current_q)
@@ -358,12 +363,12 @@ if __name__ == "__main__":
     block_order = [
         "RBottomFar3",
         "RBottomClose3",
+        "LBottomClose3",
+        "LBottomFar3",
         "RMiddleFar3", "RMiddleFar2", "RMiddleFar1",
         "RMiddleClose3", "RMiddleClose2", "RMiddleClose1",
         "RTopFar3", "RTopFar2", "RTopFar1",
         "RTopClose3", "RTopClose2", "RTopClose1",
-        "LBottomClose3",
-        "LBottomFar3",
         "RBottomFar2", "RBottomFar1",
         "RBottomClose2", "RBottomClose1",
         "LBottomClose2", "LBottomClose1",
