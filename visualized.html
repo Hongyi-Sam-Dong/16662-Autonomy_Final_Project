@@ -65,6 +65,17 @@
             background: rgba(255,50,50,0.1); border: 1px solid #ff5a5a;
             border-radius: 4px; display: none;
         }
+        #notice {
+            font-size: 11px; color: #ffb84d; font-weight: bold;
+            margin-top: 6px; padding: 5px 8px;
+            background: rgba(240,165,0,0.08); border: 1px solid rgba(240,165,0,0.5);
+            border-radius: 4px; display: none;
+        }
+        #warning ul, #notice ul {
+            margin: 4px 0 0 16px; padding: 0; font-weight: normal;
+            list-style-type: disc;
+        }
+        #warning li, #notice li { margin: 2px 0; line-height: 1.4; }
 
         .stat-row {
             display: flex; justify-content: space-between;
@@ -196,6 +207,7 @@
     </div>
 
     <div id="warning">&#9888; Collision detected! Spacing too small!</div>
+    <div id="notice"></div>
 
     <div class="stat-row">
         <span>Dominoes placed:</span>
@@ -216,7 +228,16 @@
 
 <script>
     const D_W = 5, D_T = 3;
+    const D_H = 15;                                 // cm, domino height (matches main.py DOMINO_HALF_SIZE[1]*2)
     const IDEAL_GAP = 7;
+    const CHAIN_RULES = {
+        minCenterDist: D_T + 0.5,                   // error below  → ≥ 3.5 cm center-to-center
+        maxFaceGap:    0.85 * D_H,                  // error above  → face-gap ≥ 12.75 cm (falling tip can't reach)
+        warnFaceGap:   0.55 * D_H,                  // warn  above  → face-gap ≥ 8.25 cm (borderline)
+        maxLateral:    0.5  * D_W,                  // error above  → 2.5 cm off-axis
+        maxYawDegErr:  60,                          // error above  → turn too sharp
+        maxYawDegWarn: 45,                          // warn  above  → borderline turn
+    };
 
     // --- UI ---
     const uiAutoSpace     = document.getElementById('auto-space');
@@ -232,6 +253,7 @@
     const uiBtnUndo       = document.getElementById('btn-undo');
     const uiBtnClear      = document.getElementById('btn-clear');
     const uiWarning       = document.getElementById('warning');
+    const uiNotice        = document.getElementById('notice');
     const uiCount         = document.getElementById('domino-count');
     const infoBar         = document.getElementById('info-bar');
     const panelScurve     = document.getElementById('panel-scurve');
@@ -543,11 +565,94 @@
                 pts[i].collision = pts[i+1].collision = true; hasCol = true;
             }
         }
-        uiWarning.style.display = hasCol ? 'block' : 'none';
+        // Note: #warning display is driven by checkChainLegality() in refresh(),
+        // which supersedes this function's result.
+    }
+
+    // Chain-reaction legality: for each consecutive pair, check that the falling
+    // domino will topple the next one. Returns { errors, warns } lists of
+    // { index, reason } plus marks offending dominoes with collision=true.
+    function checkChainLegality(pts) {
+        const errors = [], warns = [];
+        if (pts.length < 2) return { errors, warns };
+
+        const norm = (a) => {
+            let x = ((a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+            return x;
+        };
+
+        for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i], b = pts[i+1];
+            const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            // Fall direction of domino i: matches drawDomino's local +x after ctx.rotate(yaw).
+            const fx = Math.cos(a.yaw), fy = Math.sin(a.yaw);
+            // Pick the forward-facing side (fall is symmetric: ±fx,±fy both valid).
+            const forwardSigned = dx * fx + dy * fy;
+            const forward = Math.abs(forwardSigned);
+            const lateral = Math.abs(dx * (-fy) + dy * fx);
+            const faceGap = dist - D_T;
+
+            // Yaw delta folded to [-π/2, π/2] (dominoes symmetric mod π).
+            let dyaw = norm(b.yaw - a.yaw);
+            if (dyaw >  Math.PI / 2) dyaw -= Math.PI;
+            if (dyaw < -Math.PI / 2) dyaw += Math.PI;
+            const dyawDeg = Math.abs(dyaw * 180 / Math.PI);
+
+            let linkErr = null, linkWarn = null;
+
+            if (dist < CHAIN_RULES.minCenterDist) {
+                linkErr = `too close (${dist.toFixed(1)} cm — dominoes overlap)`;
+            } else if (forwardSigned === 0 && lateral > 0) {
+                linkErr = `next domino is sideways (forward=0)`;
+            } else if (forward < lateral) {
+                linkErr = `next domino off-axis (lateral ${lateral.toFixed(1)} > forward ${forward.toFixed(1)})`;
+            } else if (lateral > CHAIN_RULES.maxLateral) {
+                linkErr = `lateral offset ${lateral.toFixed(1)} cm > ${CHAIN_RULES.maxLateral} cm`;
+            } else if (faceGap > CHAIN_RULES.maxFaceGap) {
+                linkErr = `gap ${faceGap.toFixed(1)} cm > ${CHAIN_RULES.maxFaceGap.toFixed(1)} cm — falling tip can't reach`;
+            } else if (dyawDeg > CHAIN_RULES.maxYawDegErr) {
+                linkErr = `turn ${dyawDeg.toFixed(0)}° > ${CHAIN_RULES.maxYawDegErr}° — face misses next domino`;
+            } else if (faceGap > CHAIN_RULES.warnFaceGap) {
+                linkWarn = `wide gap ${faceGap.toFixed(1)} cm — cascade may stall`;
+            } else if (dyawDeg > CHAIN_RULES.maxYawDegWarn) {
+                linkWarn = `sharp turn ${dyawDeg.toFixed(0)}° — glancing impact`;
+            }
+
+            if (linkErr)  { errors.push({ index: i, reason: linkErr });  a.collision = b.collision = true; }
+            if (linkWarn) { warns.push({  index: i, reason: linkWarn }); }
+        }
+        return { errors, warns };
+    }
+
+    function renderLegality({ errors, warns }) {
+        const MAX_SHOWN = 5;
+        const buildList = (items, title) => {
+            const shown = items.slice(0, MAX_SHOWN);
+            const extra = items.length - shown.length;
+            const lis = shown.map(e =>
+                `<li>Domino ${e.index+1}→${e.index+2}: ${e.reason}</li>`
+            ).join('');
+            const more = extra > 0 ? `<li>…and ${extra} more</li>` : '';
+            return `${title}<ul>${lis}${more}</ul>`;
+        };
+        if (errors.length > 0) {
+            uiWarning.innerHTML = buildList(errors, '⚠ Chain will NOT cascade:');
+            uiWarning.style.display = 'block';
+        } else {
+            uiWarning.style.display = 'none';
+        }
+        if (warns.length > 0) {
+            uiNotice.innerHTML = buildList(warns, '◈ Marginal links (cascade may stall):');
+            uiNotice.style.display = 'block';
+        } else {
+            uiNotice.style.display = 'none';
+        }
     }
 
     // --- Drawing ---
     let currentPath = [], visibleCount = 0, animTimer = null;
+    let lastLegality = { errors: [], warns: [] };
 
     function drawScene(liveRaw) {
         ctx.clearRect(0, 0, W, H);
@@ -684,6 +789,10 @@
         visibleCount = currentPath.length;
         uiCount.innerText = currentPath.length || '—';
 
+        // Chain-reaction legality: find pairs that won't cascade and surface them.
+        lastLegality = checkChainLegality(currentPath);
+        renderLegality(lastLegality);
+
         // Path stats: total length + avg face-to-face gap (domino thickness = D_T = 3 cm)
         const lenStat = document.getElementById('path-length-stat');
         const gapStat = document.getElementById('path-gap-stat');
@@ -751,20 +860,39 @@
         const btnSend  = document.getElementById('btn-send');
         const btnStop  = document.getElementById('btn-stop');
         const btnReset = document.getElementById('btn-reset');
+
+        // Block send on chain-reaction errors (with a "send anyway" escape for debugging).
+        const legality = checkChainLegality(path);
+        renderLegality(legality);
+        if (legality.errors.length > 0) {
+            const lines = legality.errors.slice(0, 8).map(e =>
+                `• Domino ${e.index+1}→${e.index+2}: ${e.reason}`
+            ).join('\n');
+            const extra = legality.errors.length > 8 ? `\n…and ${legality.errors.length - 8} more` : '';
+            const proceed = confirm(
+                `Chain will NOT cascade (${legality.errors.length} issue(s)):\n\n${lines}${extra}\n\nSend anyway?`
+            );
+            if (!proceed) return;
+        }
+
         btnSend.disabled = true; btnSend.textContent = '⏳ Sending...';
 
-        // Auto-normalize custom path to workspace bounds before sending.
-        // If any point exceeds ui_x∈[-40,40] or ui_y∈[-15,15], scale the whole
-        // path down uniformly (preserving shape) so IK can always converge.
-        const WS_X = 40, WS_Y = 15;
-        let maxAbsX = 0, maxAbsY = 0;
+        // Auto-normalize: only shrink if the path escapes the visible workspace
+        // (the green dashed box drawn in drawGrid). Matches 50×55 cm workspace:
+        // x ∈ [-27.5, 27.5],  y ∈ [-13.5, 36.5] (near edge 25 cm from arm).
+        const WS_XMIN = -27.5, WS_XMAX = 27.5;
+        const WS_YMIN = -13.5, WS_YMAX = 36.5;
+        let bboxMaxX = 0, bboxMaxY = 0;  // worst-case "reach" beyond each edge
         path.forEach(pt => {
-            maxAbsX = Math.max(maxAbsX, Math.abs(pt.pos.x));
-            maxAbsY = Math.max(maxAbsY, Math.abs(pt.pos.y));
+            if (pt.pos.x >  WS_XMAX) bboxMaxX = Math.max(bboxMaxX,  pt.pos.x / WS_XMAX);
+            if (pt.pos.x <  WS_XMIN) bboxMaxX = Math.max(bboxMaxX,  pt.pos.x / WS_XMIN);
+            if (pt.pos.y >  WS_YMAX) bboxMaxY = Math.max(bboxMaxY,  pt.pos.y / WS_YMAX);
+            if (pt.pos.y <  WS_YMIN) bboxMaxY = Math.max(bboxMaxY,  pt.pos.y / WS_YMIN);
         });
         let normScale = 1;
-        if (maxAbsX > WS_X || maxAbsY > WS_Y) {
-            normScale = Math.min(WS_X / (maxAbsX || 1), WS_Y / (maxAbsY || 1));
+        const worst = Math.max(bboxMaxX, bboxMaxY);
+        if (worst > 1) {
+            normScale = 1 / worst;
             console.warn(`Custom path out of workspace — auto-scaling by ${normScale.toFixed(3)}`);
         }
 

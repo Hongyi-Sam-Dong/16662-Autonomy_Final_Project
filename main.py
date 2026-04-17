@@ -251,6 +251,57 @@ def place_domino_standing(lift_q, target_xy, target_yaw):
     run_segment(place_q,    preplace_q, GRIPPER_OPEN,   segment_steps, SEGMENT_DURATION)
     run_segment(preplace_q, HOME_QPOS,  GRIPPER_OPEN,   segment_steps, SEGMENT_DURATION)
 
+def knock_first_domino_with_arm(first_xy, first_yaw, next_xy=None):
+    """
+    Tina, 這是使用機械臂實體推倒第一顆骨牌的邏輯：
+    1. 閉合夾爪移到骨牌後方
+    2. 向骨牌方向移動推倒它
+
+    兩個關鍵修正：
+    (a) push_vec 改用 domino[0]→domino[1] 的實際連線（最穩妥，不依賴 yaw 換算）。
+        原本的 (-sin, cos) 推導出來的方向差 90°，所以手臂會沿骨牌長軸滑過去而打不到面。
+    (b) prep/strike 的 z 不能是 0（那樣 hand 會嘗試觸到地板導致 IK 失敗或撞桌）。
+        骨牌中心 z≈0.08、頂端 z≈0.155；hand 比指尖高 ~0.155m，所以 hand z=0.24
+        對應指尖 z≈0.085（骨牌中段），剛好合適推倒。
+    """
+    down_dir = np.array([0.0, 0.0, -1.0])
+
+    # 1. 計算推動方向
+    if next_xy is not None:
+        delta = np.asarray(next_xy, dtype=float) - np.asarray(first_xy, dtype=float)
+        n = np.linalg.norm(delta)
+        push_vec = (np.array([delta[0] / n, delta[1] / n, 0.0]) if n > 1e-6
+                    else np.array([-np.cos(first_yaw), np.sin(first_yaw), 0.0]))
+    else:
+        # fallback: sim 座標下的骨牌 fall direction（UI→SIM 軸交換後推出來的）
+        push_vec = np.array([-np.cos(first_yaw), np.sin(first_yaw), 0.0])
+
+    print(f"[knock] push_vec = ({push_vec[0]:+.3f}, {push_vec[1]:+.3f})")
+
+    # 2. 關鍵點：hand z=0.24 → 指尖 ~0.085（骨牌中段）
+    strike_z = 0.24
+    prep_xyz   = np.array([first_xy[0], first_xy[1], strike_z + 0.02]) - push_vec * 0.12
+    strike_xyz = np.array([first_xy[0], first_xy[1], strike_z])        + push_vec * 0.10
+
+    # 3. 解算 IK（不再強設 joint7，保留 IK 自己收斂的解即可——推一下而已，夾爪朝向無關緊要）
+    current_q = data.qpos[arm_idx].copy()
+    prep_q   = calculate_ik_6d(model, data, prep_xyz,   target_direction=down_dir, seed_q=current_q)
+    strike_q = calculate_ik_6d(model, data, strike_xyz, target_direction=down_dir, seed_q=prep_q)
+
+    # 4. 執行動作
+    print("Moving arm to strike position...")
+    run_segment(current_q, prep_q,   GRIPPER_CLOSED, segment_steps,     SEGMENT_DURATION)
+
+    print("Striking!!!")
+    run_segment(prep_q,    strike_q, GRIPPER_CLOSED, segment_steps // 3, SEGMENT_DURATION / 3)
+
+    # 停在擊倒位置，讓 chain 有時間倒下（0.5 秒）
+    run_segment(strike_q,  strike_q, GRIPPER_CLOSED, hold_steps,        HOLD_DURATION)
+
+    # 5. 撤離並回到 Home
+    run_segment(strike_q,  HOME_QPOS, GRIPPER_CLOSED, segment_steps,    SEGMENT_DURATION)
+
+
 MAX_DOMINOES = 60
 
 
@@ -341,7 +392,11 @@ if __name__ == "__main__":
                 print("\nStopped — returning home...")
                 run_segment(data.qpos[arm_idx], HOME_QPOS, GRIPPER_OPEN, segment_steps, SEGMENT_DURATION)
             else:
-                print("\n=== Assembly Complete! ===")
+                print("\n=== Assembly Complete! Knocking first domino... ===")
+                first_pos, first_yaw = domino_plan[0]
+                next_pos = domino_plan[1][0] if len(domino_plan) >= 2 else None
+                knock_first_domino_with_arm(first_pos, first_yaw, next_xy=next_pos)
+                print("=== Chain reaction complete ===")
 
     finally:
         v.close()
