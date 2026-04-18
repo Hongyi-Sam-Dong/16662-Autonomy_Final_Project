@@ -1,0 +1,4 @@
+<launch>
+  <node pkg="dominoes" type="pickup"        name="pickup"        output="screen"/>
+  <node pkg="dominoes" type="pickup_client" name="pickup_client" output="screen"/>
+</launch>

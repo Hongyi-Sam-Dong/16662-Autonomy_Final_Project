@@ -3,19 +3,15 @@ import xml.etree.ElementTree as ET
 
 import mujoco as mj
 import numpy as np
-import rclpy
-from ament_index_python.packages import (
-    PackageNotFoundError,
-    get_package_share_directory,
-)
-from rclpy.node import Node
+import rospkg
+import rospy
 
-from dominoes.srv import GetNextJointTarget
+from dominoes.srv import GetNextJointTarget, GetNextJointTargetResponse
 
 
 WAYPOINTS = np.array(
     [
-        [0.0, -0.5, 0.0, -2.0, 0.0, 1.5, 0.8, 0.04],
+        [0.0, -0.5, 0.0, -2.0, 0.0, 1.5, 0.8, 0.1],
     ],
     dtype=float,
 )
@@ -130,11 +126,11 @@ def pack_target(q_arm, gripper):
 
 def get_model_directory():
     try:
-        share_dir = Path(get_package_share_directory("dominoes"))
+        share_dir = Path(rospkg.RosPack().get_path("dominoes"))
         model_dir = share_dir / "franka_emika_panda"
         if model_dir.exists():
             return model_dir
-    except PackageNotFoundError:
+    except rospkg.ResourceNotFound:
         pass
 
     return Path(__file__).resolve().parents[2] / "franka_emika_panda"
@@ -254,13 +250,13 @@ def plan_side_pick(model, data, arm_idx, home_qpos, block_name, block_id):
     if block_name.startswith("L"):
         side_dir = left_side_dir
         pregrasp_xyz = block_pos + np.array([0.0, -0.20, 0.0])
-        grasp_xyz = block_pos + np.array([0.0, -0.15, 0.0])
+        grasp_xyz = block_pos + np.array([0.0, -0.1, 0.0])
         lift_xyz = grasp_xyz + np.array([0.0, 0.0, 0.02])
         pullout_xyz = block_pos + np.array([0.0, -0.40, 0.0])
     else:
         side_dir = right_side_dir
         pregrasp_xyz = block_pos + np.array([0.0, 0.20, 0.0])
-        grasp_xyz = block_pos + np.array([0.0, 0.15, 0.0])
+        grasp_xyz = block_pos + np.array([0.0, 0.1, 0.0])
         lift_xyz = grasp_xyz + np.array([0.0, 0.0, 0.02])
         pullout_xyz = block_pos + np.array([0.0, 0.40, 0.0])
 
@@ -301,15 +297,15 @@ def build_joint_sequence():
             [
                 {
                     "label": f"{block_name}/home_open",
-                    "joints": pack_target(home_qpos, 0.04),
+                    "joints": pack_target(home_qpos, 0.1),
                 },
                 {
                     "label": f"{block_name}/pregrasp_open",
-                    "joints": pack_target(pregrasp_q, 0.04),
+                    "joints": pack_target(pregrasp_q, 0.1),
                 },
                 {
                     "label": f"{block_name}/grasp_open",
-                    "joints": pack_target(grasp_q, 0.04),
+                    "joints": pack_target(grasp_q, 0.1),
                 },
                 {
                     "label": f"{block_name}/grasp_close",
@@ -329,7 +325,7 @@ def build_joint_sequence():
                 },
                 {
                     "label": f"{block_name}/home_open_release",
-                    "joints": pack_target(home_qpos, 0.04),
+                    "joints": pack_target(home_qpos, 0.1),
                 },
             ]
         )
@@ -337,21 +333,19 @@ def build_joint_sequence():
     return sequence
 
 
-class PickupNode(Node):
+class PickupNode:
     def __init__(self):
-        super().__init__("pickup")
         self.sequence = build_joint_sequence()
         self.cursor = 0
-        self.service = self.create_service(
-            GetNextJointTarget,
+        self.service = rospy.Service(
             "get_next_joint_target",
+            GetNextJointTarget,
             self.handle_get_next_joint_target,
         )
-        self.get_logger().info(
-            f"Precomputed {len(self.sequence)} joint targets."
-        )
+        rospy.loginfo("Precomputed %d joint targets.", len(self.sequence))
 
-    def handle_get_next_joint_target(self, request, response):
+    def handle_get_next_joint_target(self, request):
+        response = GetNextJointTargetResponse()
         if not request.next:
             response.joints = []
             return response
@@ -367,14 +361,10 @@ class PickupNode(Node):
         return response
 
 
-def main(args=None):
-    rclpy.init(args=args)
-    node = PickupNode()
-    try:
-        rclpy.spin(node)
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
+def main():
+    rospy.init_node("pickup")
+    PickupNode()
+    rospy.spin()
 
 
 if __name__ == "__main__":
