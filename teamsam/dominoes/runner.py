@@ -15,14 +15,29 @@ SERVICE_NAME = "/get_next_joint_target"
 # Gripper width clamp (metres). MIN is a minimum closed width so the fingers
 # don't fully close (e.g. keeps a grip on thin objects); MAX is the physical
 # max opening of the Franka gripper.
-GRIPPER_MIN = 0.044
+GRIPPER_MIN = 0.0
 GRIPPER_MAX = 0.08
 # Any requested width at/above this is treated as "fully open" and routed
 # through fa.open_gripper(), which reliably releases a held object. Plain
 # goto_gripper() can leave the fingers clamped after a grasp.
 OPEN_THRESHOLD = GRIPPER_MAX - 1e-4
-# Force (N) to apply when grasping.
-GRASP_FORCE = 10.0
+
+# Seconds per arm motion (goto_joints / reset_joints). frankapy default is ~5.0;
+# lower = faster. 2.0 is brisk but safe; go below 1.0 only if moves are small,
+# else Franka may reject for velocity/accel limits.
+MOVE_DURATION = 3.0
+
+# Arm duration used specifically for the clamp step (when transitioning from an
+# open gripper to a closed/grasping one). The server emits grasp_open then
+# grasp_close with IDENTICAL joint targets, so the arm has zero distance to
+# travel — keep this short so the clamp feels snappy.
+CLAMP_MOVE_DURATION = 0.1
+
+# Seconds to pause AFTER issuing the grasp command, before moving on to the
+# lift. frankapy's goto_gripper is blocking, but the gripper motor can still be
+# settling when it returns; this buffer guarantees the block is fully clamped
+# before the arm starts lifting.
+POST_CLAMP_WAIT = 0.5
 
 # Home joint pose, matches WAYPOINTS[0][:7] in the server's pickup.py. When the
 # arm lands at home AND the requested gripper width is "open", we call
@@ -44,8 +59,9 @@ def main():
     get_next = rospy.ServiceProxy(SERVICE_NAME, GetNextJointTarget)
     rospy.loginfo("service ready")
 
-    fa.reset_joints()
+    fa.reset_joints(duration=MOVE_DURATION)
     fa.open_gripper()
+    prev_gripper_state = "open"   # tracks last commanded gripper state
 
     step = 0
     while not rospy.is_shutdown():
@@ -72,14 +88,22 @@ def main():
         rospy.loginfo("step %d: joints=%s gripper=%.3f",
                       step, joint_goal, gripper_width)
 
-        fa.goto_joints(joint_goal)
-        if gripper_width >= OPEN_THRESHOLD:
-            fa.open_gripper()
-        else:
-            fa.goto_gripper(gripper_width, grasp=True, force=GRASP_FORCE)
+        desired_state = "open" if gripper_width >= OPEN_THRESHOLD else "closed"
+        is_clamp_step = desired_state == "closed" and prev_gripper_state == "open"
+        move_duration = CLAMP_MOVE_DURATION if is_clamp_step else MOVE_DURATION
+        fa.goto_joints(joint_goal, duration=move_duration)
+
+        if desired_state != prev_gripper_state:
+            if desired_state == "open":
+                fa.open_gripper()
+            else:
+                fa.close_gripper(grasp=True)
+                rospy.sleep(POST_CLAMP_WAIT)
+            prev_gripper_state = desired_state
 
         if is_at_home(joint_goal) and gripper_width >= OPEN_THRESHOLD:
             rospy.loginfo("at home with open target -> force-releasing gripper")
             fa.open_gripper()
+            prev_gripper_state = "open"
 
         step += 1

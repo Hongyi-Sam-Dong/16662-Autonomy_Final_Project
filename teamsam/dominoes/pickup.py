@@ -20,21 +20,21 @@ BLOCK_ORDER = [
     "RBottomFar3",
     "RBottomFar2",
     "RBottomFar1",
-    "RBottomClose3",
-    "RBottomClose2",
-    "RBottomClose1",
+    # "RBottomClose3",
+    # "RBottomClose2",
+    # "RBottomClose1",
     "RMiddleFar3",
     "RMiddleFar2",
     "RMiddleFar1",
-    "RMiddleClose3",
-    "RMiddleClose2",
-    "RMiddleClose1",
+    # "RMiddleClose3",
+    # "RMiddleClose2",
+    # "RMiddleClose1",
     "RTopFar3",
     "RTopFar2",
     "RTopFar1",
-    "RTopClose3",
-    "RTopClose2",
-    "RTopClose1",
+    # "RTopClose3",
+    # "RTopClose2",
+    # "RTopClose1",
     "LBottomClose3",
     "LBottomClose2",
     "LBottomClose1",
@@ -250,13 +250,13 @@ def plan_side_pick(model, data, arm_idx, home_qpos, block_name, block_id):
     if block_name.startswith("L"):
         side_dir = left_side_dir
         pregrasp_xyz = block_pos + np.array([0.0, -0.20, 0.0])
-        grasp_xyz = block_pos + np.array([0.0, -0.1, 0.0])
+        grasp_xyz = block_pos + np.array([0.0, -0.12, 0.0])
         lift_xyz = grasp_xyz + np.array([0.0, 0.0, 0.02])
         pullout_xyz = block_pos + np.array([0.0, -0.40, 0.0])
     else:
         side_dir = right_side_dir
         pregrasp_xyz = block_pos + np.array([0.0, 0.20, 0.0])
-        grasp_xyz = block_pos + np.array([0.0, 0.1, 0.0])
+        grasp_xyz = block_pos + np.array([0.0, 0.12, 0.0])
         lift_xyz = grasp_xyz + np.array([0.0, 0.0, 0.02])
         pullout_xyz = block_pos + np.array([0.0, 0.40, 0.0])
 
@@ -274,7 +274,6 @@ def plan_side_pick(model, data, arm_idx, home_qpos, block_name, block_id):
 def build_joint_sequence():
     model, data, arm_idx = build_planning_model()
     home_qpos = WAYPOINTS[0][:7].copy()
-
     block_ids = {}
     for block_name in BLOCK_ORDER:
         block_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, block_name)
@@ -322,10 +321,6 @@ def build_joint_sequence():
                 {
                     "label": f"{block_name}/home_close",
                     "joints": pack_target(home_qpos, 0.0),
-                },
-                {
-                    "label": f"{block_name}/home_open_release",
-                    "joints": pack_target(home_qpos, 0.1),
                 },
             ]
         )

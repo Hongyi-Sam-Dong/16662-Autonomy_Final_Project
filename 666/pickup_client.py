@@ -35,7 +35,7 @@ def main():
 
         if len(resp.joints) == 0:
             rospy.loginfo("sequence complete after %d steps", step)
-            break
+            breakrosrun dominoes pickup_client
 
         if len(resp.joints) != 8:
             rospy.logwarn("expected 8 values (7 joints + gripper), got %d; skipping",
