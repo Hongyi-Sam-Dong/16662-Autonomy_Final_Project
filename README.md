@@ -1,126 +1,158 @@
-# Dominoes Pickup Node
+# Dominoes Pickup — Run Guide
 
-This workspace contains a ROS2 service node that precomputes a list of robot joint targets for the domino pickup task and serves them one at a time on request.
+ROS1 (Noetic) package `dominoes` that plans and executes domino pickups on a
+Franka Panda. A server node advertises `/get_next_joint_target`; a client node
+calls it in a loop and drives the arm through `frankapy`.
 
-The node does not run the MuJoCo viewer, physics stepping, or torque control loop. Instead, at startup it:
+- Server entry point: `teamsam/scripts/pickup` → `dominoes.pickup:main`
+- Client entry point: `teamsam/scripts/pickup_client` → `dominoes.runner:main`
+- Launch file: `teamsam/launch/pickup.launch`
 
-- builds the shelf and block scene from the MuJoCo model
-- runs inverse kinematics to compute arm joint targets for each pickup stage
-- stores the targets as joint arrays in memory
-- waits for a ROS2 service request and returns the next target in the list
+The folder is named `teamsam/` but `package.xml` declares the ROS package name
+`dominoes` — that's the name you use with `roslaunch` / `rosrun`.
 
-Each returned target is a full joint vector:
-
-- `7` Panda arm joints
-- `1` gripper value
-
-## Service
-
-Service name:
-
-```bash
-/get_next_joint_target
-```
-
-Service type:
-
-```bash
-dominoes/srv/GetNextJointTarget
-```
-
-Service definition:
-
-```srv
-bool next
 ---
-float64[] joints
-```
 
-Behavior:
+## 1. Start the docker container
 
-- send `next: true` to get the next precomputed joint target
-- send `next: false` to get an empty list and leave the cursor unchanged
-- when the sequence is exhausted, the node returns an empty `joints` list
-
-Note:
-
-- there is currently no reset service
-- to restart the sequence from the beginning, restart the node
-
-## Build
-
-From the workspace root:
+On the host:
 
 ```bash
-source /opt/ros/humble/setup.bash
-colcon build --packages-select dominoes --cmake-clean-cache
+cd /home/student/16662_RobotAutonomy
+./run_docker.sh
 ```
 
-The workspace may print noisy package-discovery warnings from `mujoco_env`. The `dominoes` package build should still succeed.
+This drops you into a bash shell inside the container at `/home/ros_ws`.
+`run_docker.sh` uses `--rm`, so anything installed inside the container is
+**lost on exit** (see §5 for a permanent fix).
 
-## Run
-
-In terminal 1:
+For extra terminals inside the same running container, on the host run:
 
 ```bash
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 run dominoes pickup
+./terminal_docker.sh
 ```
 
-If the node starts correctly, it will precompute the sequence and then wait for service calls.
+---
 
-## Test The Service
+## 2. One-time setup (per container session)
 
-In terminal 2:
+Inside the container:
 
 ```bash
-source /opt/ros/humble/setup.bash
-source install/setup.bash
+# 2a. Install mujoco (used by pickup.py for planning).
+pip3 install mujoco
+python3 -c "import mujoco; print(mujoco.__version__)"   # sanity check
+
+# 2b. Build the workspace so the `dominoes` Python package is on sys.path
+#     via catkin_python_setup().
+cd /home/ros_ws
+catkin_make
+source devel/setup.bash
+
+# 2c. Verify ROS sees the package and Python can import it.
+rospack find dominoes
+python3 -c "import dominoes, dominoes.pickup; print(dominoes.__file__)"
 ```
 
-Check that the service exists:
+If `rospack` can't find `dominoes`, re-source `devel/setup.bash` in that shell.
+If the Python import fails, re-run `catkin_make`.
+
+---
+
+## 3. Start FrankaPy (required for the client)
+
+The client (`pickup_client`) calls `FrankaArm()`, which needs the frankapy
+control bridge running. In its own terminal inside the container:
 
 ```bash
-ros2 service list | grep get_next_joint_target
-ros2 service type /get_next_joint_target
+bash /home/ros_ws/src/git_packages/frankapy/bash_scripts/start_control_pc.sh -i iam-<robot-name>
 ```
 
-Request the next joint target:
+Replace `iam-<robot-name>` with your lab's control PC hostname. Leave this
+running.
+
+---
+
+## 4. Run the pickup
+
+Use two terminals inside the container. **Both** need
+`source /home/ros_ws/devel/setup.bash` (usually auto-sourced by `~/.bashrc`).
+
+**Terminal A — server:**
 
 ```bash
-ros2 service call /get_next_joint_target dominoes/srv/GetNextJointTarget "{next: true}"
+roslaunch dominoes pickup.launch
 ```
 
-Call it again to advance to the next target:
+Keep this running. It brings up the `pickup` node and advertises
+`/get_next_joint_target`.
+
+**Terminal B — client:**
 
 ```bash
-ros2 service call /get_next_joint_target dominoes/srv/GetNextJointTarget "{next: true}"
+rosrun dominoes pickup_client
 ```
 
-Test the no-op branch:
+The client resets the arm, opens the gripper, then repeatedly calls the
+service. Each response gives 8 floats: `joints[0:7]` are arm joint targets,
+`joints[7]` is a gripper width (`0.08` ≈ fully open, `0.0` = closed). An empty
+response ends the sequence.
+
+Stop either side with `Ctrl-C`.
+
+---
+
+## 5. Make mujoco permanent (optional)
+
+`run_docker.sh` uses `--rm`, so `pip3 install mujoco` must be re-run every
+time. The `Dockerfile` already contains `RUN pip3 install mujoco`; just
+rebuild the image once on the host:
 
 ```bash
-ros2 service call /get_next_joint_target dominoes/srv/GetNextJointTarget "{next: false}"
+cd /home/student/16662_RobotAutonomy
+docker build -t frankapy_docker .
+./run_docker.sh
 ```
 
-Expected result:
+After this, step 2a is no longer needed.
 
-- `next: true` returns a `joints` array
-- `next: false` returns `joints: []`
-- after the last target, the node returns `joints: []`
+---
 
-## What The Joint Sequence Contains
+## Troubleshooting
 
-For each block in the configured block order, the node precomputes waypoint-style targets such as:
+| Symptom | Fix |
+|---|---|
+| `ModuleNotFoundError: No module named 'mujoco'` | `pip3 install mujoco` (§2a) |
+| `ModuleNotFoundError: No module named 'dominoes'` | `cd /home/ros_ws && catkin_make && source devel/setup.bash` |
+| `[rospack] Error: package 'dominoes' not found` | `source /home/ros_ws/devel/setup.bash` in that shell |
+| `rosrun` says executable not found | `chmod +x teamsam/scripts/pickup teamsam/scripts/pickup_client`, then `catkin_make` |
+| Client hangs on `waiting for service /get_next_joint_target` | Server (terminal A) isn't running or crashed |
+| Client errors from `FrankaArm()` | FrankaPy control PC (§3) isn't running |
+| Stale build state after edits | `cd /home/ros_ws && rm -rf build devel && catkin_make` |
 
-- home, gripper open
-- pregrasp, gripper open
-- grasp, gripper open
-- grasp, gripper closed
-- lift, gripper closed
-- pullout, gripper closed
-- home, gripper closed
-- home, gripper open
+---
 
-These are discrete targets, not a time-parameterized trajectory. The client is responsible for deciding how to execute or interpolate between them.
+## Repo layout
+
+```
+Team_Sam_16662-Autonomy_Final_Project/
+├── 666/                   # scratch / experiments (joint_subscriber.py, test.py, ...)
+└── teamsam/               # ROS package (package.xml name: "dominoes")
+    ├── CMakeLists.txt
+    ├── package.xml
+    ├── setup.py           # catkin_python_setup → installs `dominoes` py pkg
+    ├── srv/
+    │   └── GetNextJointTarget.srv
+    ├── launch/
+    │   ├── pickup.launch
+    │   └── run_all.launch
+    ├── scripts/
+    │   ├── pickup         # server entry point
+    │   └── pickup_client  # client entry point
+    ├── dominoes/          # Python package
+    │   ├── __init__.py
+    │   ├── pickup.py      # server impl (uses mujoco)
+    │   └── runner.py      # client impl (uses frankapy)
+    ├── config/
+    └── franka_emika_panda/
+```
