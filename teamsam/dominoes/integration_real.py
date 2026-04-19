@@ -364,17 +364,26 @@ def _is_at_home(joints):
 
 def _ik_chain(model, data, arm_idx, seed_q, targets):
     """Solve IK for a sequence of (xyz, direction) targets, progressively
-    seeding each solve from the previous solution."""
-    data.qpos[arm_idx] = np.asarray(seed_q, dtype=float)
-    data.qvel[arm_idx] = 0.0
-    mj.mj_forward(model, data)
-    solutions = []
-    for xyz, direction in targets:
-        q = calculate_ik_6d(model, data, xyz, direction)
-        solutions.append(q)
-        data.qpos[arm_idx] = q
+    seeding each solve from the previous solution. Snapshots data.qpos/qvel
+    on entry and restores them on exit so planning never corrupts the live
+    sim state (the executor reads q_start from data.qpos)."""
+    qpos_saved = data.qpos.copy()
+    qvel_saved = data.qvel.copy()
+    try:
+        data.qpos[arm_idx] = np.asarray(seed_q, dtype=float)
+        data.qvel[arm_idx] = 0.0
         mj.mj_forward(model, data)
-    return solutions
+        solutions = []
+        for xyz, direction in targets:
+            q = calculate_ik_6d(model, data, xyz, direction)
+            solutions.append(q)
+            data.qpos[arm_idx] = q
+            mj.mj_forward(model, data)
+        return solutions
+    finally:
+        data.qpos[:] = qpos_saved
+        data.qvel[:] = qvel_saved
+        mj.mj_forward(model, data)
 
 
 def _normalize_angle(angle):
@@ -451,17 +460,17 @@ def plan_knock_first_domino(model, data, arm_idx, current_q, first_xy, first_yaw
             push_vec = -push_vec
 
     transit_xyz  = np.array([first_xy[0], first_xy[1], 0.45])
-    preplace_xyz = np.array([first_xy[0], first_xy[1], PLACED_GRASP_Z + 0.10])
-    prep_xyz     = np.array([first_xy[0] - push_vec[0] * 0.02,
-                             first_xy[1] - push_vec[1] * 0.02,
+    preplace_xyz = np.array([first_xy[0], first_xy[1], PLACED_GRASP_Z])
+    prep_xyz     = np.array([first_xy[0] - push_vec[0] * 0.03,
+                             first_xy[1] - push_vec[1] * 0.03,
                              PLACED_GRASP_Z])
     if next_xy is not None:
         strike_xyz = np.array([(first_xy[0] + next_xy[0]) / 2.0,
                                (first_xy[1] + next_xy[1]) / 2.0,
                                PLACED_GRASP_Z])
     else:
-        strike_xyz = np.array([first_xy[0] + push_vec[0] * 0.04,
-                               first_xy[1] + push_vec[1] * 0.04,
+        strike_xyz = np.array([first_xy[0] + push_vec[0] * 0.05,
+                               first_xy[1] + push_vec[1] * 0.05,
                                PLACED_GRASP_Z + 0.01])
 
     transit_q, preplace_q, prep_q, strike_q = _ik_chain(
