@@ -3,11 +3,12 @@ import mujoco as mj
 from mujoco import viewer
 import xml.etree.ElementTree as ET
 import time
-import RobotUtil as rt
 import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'teamsam', 'dominoes'))
+import RobotUtil as rt
 import threading
 import json as _json
-import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import webbrowser
 
@@ -35,7 +36,7 @@ class _UIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == '/':
-            html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'visualized.html')
+            html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'teamsam', 'config', 'visualized.html')
             with open(html_path, 'rb') as f:
                 body = f.read()
             self.send_response(200)
