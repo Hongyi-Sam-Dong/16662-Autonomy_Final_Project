@@ -476,7 +476,7 @@ def plan_knock_first_domino(model, data, arm_idx, current_q, first_xy, first_yaw
     # 2.5 cm above the first block's center (center of a standing domino sits
     # at PLACED_GRASP_Z in the planning model, since that's also where the
     # gripper held it during placement).
-    knock_z = PLACED_GRASP_Z - 0.1
+    knock_z = PLACED_GRASP_Z -0.025
 
     transit_xyz  = np.array([first_xy_np[0], first_xy_np[1], 0.45])
     preplace_xyz = np.array([first_xy_np[0]- direction[0]* 0.03, first_xy_np[1] - direction[1]* 0.03, knock_z + 0.10])
@@ -490,6 +490,20 @@ def plan_knock_first_domino(model, data, arm_idx, current_q, first_xy, first_yaw
         [(transit_xyz, down_dir), (preplace_xyz, down_dir),
          (prep_xyz, down_dir), (strike_xyz, down_dir)],
     )
+
+    # Match the wrist rotation used to place the first domino so the gripper
+    # orientation over the block is identical. Mirrors the IK + selection
+    # done inside plan_place_domino_standing for the place pose.
+    place_xyz_for_j7 = np.array([first_xy_np[0], first_xy_np[1], PLACED_GRASP_Z])
+    (place_q_for_j7,) = _ik_chain(
+        model, data, arm_idx, current_q,
+        [(place_xyz_for_j7, down_dir)],
+    )
+    placement_j7 = _choose_joint7_for_yaw(place_q_for_j7[6], first_yaw, current_q[6])
+    transit_q[6]  = placement_j7
+    preplace_q[6] = placement_j7
+    prep_q[6]     = placement_j7
+    strike_q[6]   = placement_j7
 
     return [
         (transit_q,  GRIPPER_CLOSED, MOVE_DURATION),
