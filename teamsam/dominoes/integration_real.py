@@ -20,7 +20,9 @@ planning-model builder, and side-pick motion plan are inlined below.
 """
 import argparse
 import os
+import sys
 import threading
+import time
 import types
 import json as _json
 import webbrowser
@@ -31,7 +33,6 @@ from pathlib import Path
 import numpy as np
 import mujoco as mj
 from mujoco import viewer as _mjviewer
-import rospy
 
 
 WAYPOINTS = np.array(
@@ -85,6 +86,26 @@ _HTML_PATH  = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', 'config', 'visuali
 _ui_positions = []
 _start_event  = threading.Event()
 _stop_event   = threading.Event()
+
+
+# Stdlib shims — the module intentionally does NOT import rospy at the top so
+# `python3 integration_real.py` works in sim mode on a machine without ROS
+# installed. Under --real, main() imports rospy lazily for ROS logging;
+# these shims are a no-op fallback everywhere else.
+def _is_shutdown():
+    return False
+
+
+def _log(msg, *args):
+    print(msg % args if args else msg)
+
+
+def _logwarn(msg, *args):
+    print("WARN: " + (msg % args if args else msg))
+
+
+def _logerr(msg, *args):
+    print("ERROR: " + (msg % args if args else msg))
 
 
 class _UIHandler(BaseHTTPRequestHandler):
@@ -490,7 +511,7 @@ def execute_waypoints(waypoints, sim_ctx=None, fa=None, prev_gripper_state="open
     skipped when its context is None. Gripper state machine for the real arm
     matches runner.py:91-107."""
     for joints, gripper_width, duration in waypoints:
-        if rospy.is_shutdown() or _stop_event.is_set():
+        if _is_shutdown() or _stop_event.is_set():
             return prev_gripper_state
 
         joint_goal = list(joints)
@@ -513,7 +534,7 @@ def execute_waypoints(waypoints, sim_ctx=None, fa=None, prev_gripper_state="open
                     fa.open_gripper()
                 else:
                     fa.close_gripper(grasp=True)
-                    rospy.sleep(POST_CLAMP_WAIT)
+                    time.sleep(POST_CLAMP_WAIT)
                 prev_gripper_state = desired
 
             if _is_at_home(joint_goal) and gripper_width >= OPEN_THRESHOLD:
@@ -545,13 +566,12 @@ def _reset_sim_to_home(sim_ctx):
 
 
 def main():
-    args = _parse_args(rospy.myargv()[1:])
+    args = _parse_args(sys.argv[1:])
     if not (args.sim or args.real):
-        rospy.logerr("Both --sim and --real are disabled; nothing to run.")
+        _logerr("Both --sim and --real are disabled; nothing to run.")
         return
 
-    rospy.init_node("integration_real", anonymous=False)
-    rospy.loginfo("Mode: sim=%s real=%s", args.sim, args.real)
+    _log("Mode: sim=%s real=%s", args.sim, args.real)
 
     model, data, arm_idx = _build_planning_model()
 
@@ -578,6 +598,8 @@ def main():
 
     fa = None
     if args.real:
+        import rospy
+        rospy.init_node("integration_real", anonymous=False)
         from frankapy import FrankaArm
         fa = FrankaArm()
         fa.reset_joints(duration=MOVE_DURATION)
@@ -586,17 +608,17 @@ def main():
 
     server = HTTPServer(('localhost', 5000), _UIHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    rospy.loginfo("UI serving at http://localhost:5000 (source: %s)", _HTML_PATH)
+    _log("UI serving at http://localhost:5000 (source: %s)", _HTML_PATH)
     try:
         webbrowser.open('http://localhost:5000')
     except Exception:
         pass
 
     try:
-        while not rospy.is_shutdown():
-            rospy.loginfo("Waiting for positions from UI...")
+        while not _is_shutdown():
+            _log("Waiting for positions from UI...")
             while not _start_event.wait(timeout=0.5):
-                if rospy.is_shutdown():
+                if _is_shutdown():
                     return
             _start_event.clear()
             _stop_event.clear()
@@ -607,10 +629,10 @@ def main():
 
             n = min(len(domino_plan), len(BLOCK_ORDER))
             if len(domino_plan) > len(BLOCK_ORDER):
-                rospy.logwarn("UI sent %d dominoes; truncating to %d (shelf capacity).",
+                _logwarn("UI sent %d dominoes; truncating to %d (shelf capacity).",
                               len(domino_plan), len(BLOCK_ORDER))
 
-            rospy.loginfo("=== Starting %d domino(es) ===", n)
+            _log("=== Starting %d domino(es) ===", n)
 
             for i in range(n):
                 if _stop_event.is_set():
@@ -618,7 +640,7 @@ def main():
                 block_name = BLOCK_ORDER[i]
                 target_xy, target_yaw = domino_plan[i]
 
-                rospy.loginfo("[%d/%d] Pick %s from shelf", i + 1, n, block_name)
+                _log("[%d/%d] Pick %s from shelf", i + 1, n, block_name)
                 pickup_wps = plan_pickup_waypoints(model, data, arm_idx,
                                                    block_name, block_ids[block_name])
                 prev_gripper = execute_waypoints(
@@ -632,7 +654,7 @@ def main():
                 if _stop_event.is_set():
                     break
 
-                rospy.loginfo("        Place at xy=(%.3f, %.3f) yaw=%.3f",
+                _log("        Place at xy=(%.3f, %.3f) yaw=%.3f",
                               target_xy[0], target_xy[1], target_yaw)
                 place_wps = plan_place_domino_standing(
                     model, data, arm_idx, HOME_QPOS, target_xy, target_yaw
@@ -646,7 +668,7 @@ def main():
                     mj.mj_forward(model, data)
 
             if _stop_event.is_set():
-                rospy.logwarn("Stopped — returning home.")
+                _logwarn("Stopped — returning home.")
                 if fa is not None:
                     fa.reset_joints(duration=MOVE_DURATION)
                     fa.open_gripper()
@@ -655,7 +677,7 @@ def main():
                     _reset_sim_to_home(sim_ctx)
                 continue
 
-            rospy.loginfo("=== Placements done, knocking first domino ===")
+            _log("=== Placements done, knocking first domino ===")
             first_xy, first_yaw = domino_plan[0]
             next_xy = domino_plan[1][0] if n >= 2 else None
             knock_wps = plan_knock_first_domino(
@@ -665,7 +687,7 @@ def main():
                 knock_wps, sim_ctx=sim_ctx, fa=fa,
                 prev_gripper_state=prev_gripper,
             )
-            rospy.loginfo("=== Chain reaction complete ===")
+            _log("=== Chain reaction complete ===")
 
     finally:
         server.shutdown()
