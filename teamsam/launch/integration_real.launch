@@ -1,0 +1,3 @@
+<launch>
+  <node pkg="dominoes" type="integration_real" name="integration_real" output="screen"/>
+</launch>

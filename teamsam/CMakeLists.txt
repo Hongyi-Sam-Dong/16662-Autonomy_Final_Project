@@ -22,6 +22,7 @@ catkin_package(
 catkin_install_python(PROGRAMS
   scripts/pickup
   scripts/pickup_client
+  scripts/integration_real
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
