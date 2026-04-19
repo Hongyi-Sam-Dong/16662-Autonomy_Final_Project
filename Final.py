@@ -11,8 +11,8 @@ import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import webbrowser
 
-ROOT_MODEL_XML = "franka_emika_panda/panda_torque_table.xml"
-MODEL_XML      = "franka_emika_panda/panda_torque_table_final.xml"
+ROOT_MODEL_XML = "teamsam/franka_emika_panda/panda_torque_table.xml"
+MODEL_XML      = "teamsam/franka_emika_panda/panda_torque_table_final.xml"
 
 KP = np.array([120, 120, 100, 90, 60, 40, 30], dtype=float)
 KD = np.array([  8,   8,   6,  5,  4,  3,  2], dtype=float)
