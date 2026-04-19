@@ -478,11 +478,9 @@ def plan_knock_first_domino(model, data, arm_idx, current_q, first_xy, first_yaw
     # gripper held it during placement).
     knock_z = PLACED_GRASP_Z -0.025
 
-    transit_xyz  = np.array([first_xy_np[0], first_xy_np[1], 0.45])
-    preplace_xyz = np.array([first_xy_np[0]- direction[0]* 0.03, first_xy_np[1] - direction[1]* 0.03, knock_z + 0.10])
-    prep_xyz     = np.array([first_xy_np[0] - direction[0] * 0.03,
-                             first_xy_np[1] - direction[1] * 0.03,
-                             knock_z])
+    transit_xyz  = np.array([first_xy_np[0] - direction[0] * 0.03, first_xy_np[1] - direction[1] * 0.03, 0.45])
+    preplace_xyz = np.array([first_xy_np[0] - direction[0] * 0.03, first_xy_np[1] - direction[1] * 0.03, knock_z + 0.10])
+    prep_xyz     = np.array([first_xy_np[0] - direction[0] * 0.03, first_xy_np[1] - direction[1] * 0.03, knock_z])
     strike_xyz   = np.array([mid_xy[0], mid_xy[1], knock_z])
 
     transit_q, preplace_q, prep_q, strike_q = _ik_chain(
