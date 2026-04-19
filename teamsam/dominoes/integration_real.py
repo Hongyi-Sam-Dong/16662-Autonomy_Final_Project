@@ -449,29 +449,41 @@ def plan_place_domino_standing(model, data, arm_idx, current_q, target_xy, targe
 
 
 def plan_knock_first_domino(model, data, arm_idx, current_q, first_xy, first_yaw, next_xy):
-    """Port of integration_simulation.py:213-252 minus the torque-control loop.
-    Gripper stays closed throughout; no hold waypoint (frankapy goto_joints is
-    blocking, so the arm naturally settles at strike_q before retracting)."""
+    """Knock the first domino toward the second one. The strike direction is
+    taken directly from (next_xy - first_xy), ignoring first_yaw. The arm
+    approaches 2 cm in front of the first block along that direction, then
+    slides in a straight line to the midpoint between the two blocks,
+    dragging the closed gripper across the first block's top to tip it.
+    Strike-plane z sits 2.5 cm above the first block's center (knock_z).
+    Fallback: if next_xy is None (single-domino UI), derive direction from
+    first_yaw so the knock still plays."""
     down_dir = np.array([0.0, 0.0, -1.0])
-    push_vec = np.array([-np.cos(first_yaw), np.sin(first_yaw), 0.0])
-    if next_xy is not None:
-        delta = np.asarray(next_xy, dtype=float) - np.asarray(first_xy, dtype=float)
-        if push_vec[0] * delta[0] + push_vec[1] * delta[1] < 0:
-            push_vec = -push_vec
+    first_xy_np = np.asarray(first_xy, dtype=float)
 
-    transit_xyz  = np.array([first_xy[0], first_xy[1], 0.45])
-    preplace_xyz = np.array([first_xy[0], first_xy[1], PLACED_GRASP_Z])
-    prep_xyz     = np.array([first_xy[0] - push_vec[0] * 0.03,
-                             first_xy[1] - push_vec[1] * 0.03,
-                             PLACED_GRASP_Z])
     if next_xy is not None:
-        strike_xyz = np.array([(first_xy[0] + next_xy[0]) / 2.0,
-                               (first_xy[1] + next_xy[1]) / 2.0,
-                               PLACED_GRASP_Z])
+        delta = np.asarray(next_xy, dtype=float) - first_xy_np
+        dist = float(np.linalg.norm(delta))
+        if dist < 1e-6:
+            direction = np.array([-np.cos(first_yaw), np.sin(first_yaw)])
+            mid_xy = first_xy_np + direction * 0.04
+        else:
+            direction = delta / dist
+            mid_xy = (first_xy_np + np.asarray(next_xy, dtype=float)) / 2.0
     else:
-        strike_xyz = np.array([first_xy[0] + push_vec[0] * 0.05,
-                               first_xy[1] + push_vec[1] * 0.05,
-                               PLACED_GRASP_Z + 0.01])
+        direction = np.array([-np.cos(first_yaw), np.sin(first_yaw)])
+        mid_xy = first_xy_np + direction * 0.04
+
+    # 2.5 cm above the first block's center (center of a standing domino sits
+    # at PLACED_GRASP_Z in the planning model, since that's also where the
+    # gripper held it during placement).
+    knock_z = PLACED_GRASP_Z - 0.1
+
+    transit_xyz  = np.array([first_xy_np[0], first_xy_np[1], 0.45])
+    preplace_xyz = np.array([first_xy_np[0]- direction[0]* 0.03, first_xy_np[1] - direction[1]* 0.03, knock_z + 0.10])
+    prep_xyz     = np.array([first_xy_np[0] - direction[0] * 0.03,
+                             first_xy_np[1] - direction[1] * 0.03,
+                             knock_z])
+    strike_xyz   = np.array([mid_xy[0], mid_xy[1], knock_z])
 
     transit_q, preplace_q, prep_q, strike_q = _ik_chain(
         model, data, arm_idx, current_q,
