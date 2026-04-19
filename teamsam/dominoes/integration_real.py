@@ -1,4 +1,4 @@
-"""Real-robot domino stacking with web UI.
+"""Domino stacking with web UI — sim, real, or both.
 
 Self-contained ROS1 node that:
   1. Serves the domino-placement web UI on http://localhost:5000 (visualized.html).
@@ -7,14 +7,21 @@ Self-contained ROS1 node that:
      the UI pose, using on-the-fly IK against a MuJoCo planning model.
   4. After the last placement, knocks the first domino to start the chain.
 
-Execution goes directly to the arm via frankapy — no /get_next_joint_target
-service, no MuJoCo viewer, no torque control. MuJoCo is used for IK only.
+Execution backend is selectable via CLI flags:
+  --sim / --no-sim      (default: --sim)    visualize + torque-track in MuJoCo
+  --real / --no-real    (default: --no-real) drive the real arm via frankapy
+
+Default mode is sim-only. Pass --real to enable the arm; pass --no-sim if you
+only want the real arm. Both flags on runs sim first then real per segment
+(useful as a visual preview before committing to the physical motion).
 
 This module is intentionally independent of dominoes.pickup — the IK solver,
 planning-model builder, and side-pick motion plan are inlined below.
 """
+import argparse
 import os
 import threading
+import types
 import json as _json
 import webbrowser
 import xml.etree.ElementTree as ET
@@ -23,8 +30,8 @@ from pathlib import Path
 
 import numpy as np
 import mujoco as mj
+from mujoco import viewer as _mjviewer
 import rospy
-from frankapy import FrankaArm
 
 
 WAYPOINTS = np.array(
@@ -61,6 +68,13 @@ MOVE_DURATION       = 3.0
 CLAMP_MOVE_DURATION = 0.1
 POST_CLAMP_WAIT     = 0.5
 HOME_TOL            = 1e-2
+
+# Sim-side constants (used only when --sim is active).
+KP = np.array([120, 120, 100, 90, 60, 40, 30], dtype=float)
+KD = np.array([  8,   8,   6,  5,  4,  3,  2], dtype=float)
+SIM_GRIPPER_OPEN    = 0.04
+SIM_GRIPPER_CLOSED  = 0.015
+SIM_CLAMP_DURATION  = 1.0
 
 PLACED_GRASP_Z = 0.235
 JOINT7_LIMIT   = 2.8973
@@ -445,34 +459,99 @@ def plan_knock_first_domino(model, data, arm_idx, current_q, first_xy, first_yaw
     ]
 
 
-def execute_waypoints(fa, waypoints, prev_gripper_state):
-    """Drive the real arm through (joints, gripper_width, duration) waypoints.
-    Gripper state machine matches runner.py:91-107."""
+def _sim_run_segment(ctx, q_start, q_goal, gripper_pos, duration):
+    """Torque-track from q_start to q_goal over `duration` seconds, holding the
+    gripper at `gripper_pos`. Ported verbatim from integration_simulation.py,
+    with _stop_event guard so the UI Stop button can interrupt mid-segment."""
+    try:
+        from dominoes import RobotUtil as rt
+    except ImportError:
+        import RobotUtil as rt
+
+    n_steps = max(1, int(duration / ctx.dt))
+    t = 0.0
+    for _ in range(n_steps):
+        if _stop_event.is_set():
+            return
+        q_des, qd_des = rt.interp_min_jerk(q_start, q_goal, t, duration)
+        q  = ctx.data.qpos[ctx.arm_idx].copy()
+        qd = ctx.data.qvel[ctx.arm_idx].copy()
+        tau = KP * (q_des - q) + KD * (qd_des - qd)
+        ctx.data.ctrl[ctx.arm_idx]     = tau + ctx.data.qfrc_bias[:7]
+        ctx.data.ctrl[ctx.gripper_idx] = gripper_pos
+        mj.mj_step(ctx.model, ctx.data)
+        ctx.viewer.sync()
+        t += ctx.dt
+
+
+def execute_waypoints(waypoints, sim_ctx=None, fa=None, prev_gripper_state="open"):
+    """Drive the selected backends through (joints, gripper_width, duration)
+    waypoints. Sim runs first (preview), then real (execute). Either side is
+    skipped when its context is None. Gripper state machine for the real arm
+    matches runner.py:91-107."""
     for joints, gripper_width, duration in waypoints:
         if rospy.is_shutdown() or _stop_event.is_set():
             return prev_gripper_state
 
         joint_goal = list(joints)
-        fa.goto_joints(joint_goal, duration=duration)
 
-        desired = "open" if gripper_width >= OPEN_THRESHOLD else "closed"
-        if desired != prev_gripper_state:
-            if desired == "open":
+        if sim_ctx is not None:
+            q_start  = sim_ctx.data.qpos[sim_ctx.arm_idx].copy()
+            sim_grip = SIM_GRIPPER_OPEN if gripper_width >= OPEN_THRESHOLD else SIM_GRIPPER_CLOSED
+            sim_dur  = SIM_CLAMP_DURATION if duration < 0.2 else duration
+            _sim_run_segment(sim_ctx, q_start, np.asarray(joint_goal, dtype=float),
+                             sim_grip, sim_dur)
+            if _stop_event.is_set():
+                return prev_gripper_state
+
+        if fa is not None:
+            fa.goto_joints(joint_goal, duration=duration)
+
+            desired = "open" if gripper_width >= OPEN_THRESHOLD else "closed"
+            if desired != prev_gripper_state:
+                if desired == "open":
+                    fa.open_gripper()
+                else:
+                    fa.close_gripper(grasp=True)
+                    rospy.sleep(POST_CLAMP_WAIT)
+                prev_gripper_state = desired
+
+            if _is_at_home(joint_goal) and gripper_width >= OPEN_THRESHOLD:
                 fa.open_gripper()
-            else:
-                fa.close_gripper(grasp=True)
-                rospy.sleep(POST_CLAMP_WAIT)
-            prev_gripper_state = desired
-
-        if _is_at_home(joint_goal) and gripper_width >= OPEN_THRESHOLD:
-            fa.open_gripper()
-            prev_gripper_state = "open"
+                prev_gripper_state = "open"
 
     return prev_gripper_state
 
 
+def _parse_args(argv):
+    parser = argparse.ArgumentParser(
+        prog="integration_real",
+        description="Domino stacking with web UI (sim, real, or both).",
+    )
+    parser.add_argument('--sim',    dest='sim',  action='store_true')
+    parser.add_argument('--no-sim', dest='sim',  action='store_false')
+    parser.set_defaults(sim=True)
+    parser.add_argument('--real',    dest='real', action='store_true')
+    parser.add_argument('--no-real', dest='real', action='store_false')
+    parser.set_defaults(real=False)
+    return parser.parse_args(argv)
+
+
+def _reset_sim_to_home(sim_ctx):
+    sim_ctx.data.qpos[sim_ctx.arm_idx] = HOME_QPOS
+    sim_ctx.data.qvel[sim_ctx.arm_idx] = 0.0
+    mj.mj_forward(sim_ctx.model, sim_ctx.data)
+    sim_ctx.viewer.sync()
+
+
 def main():
+    args = _parse_args(rospy.myargv()[1:])
+    if not (args.sim or args.real):
+        rospy.logerr("Both --sim and --real are disabled; nothing to run.")
+        return
+
     rospy.init_node("integration_real", anonymous=False)
+    rospy.loginfo("Mode: sim=%s real=%s", args.sim, args.real)
 
     model, data, arm_idx = _build_planning_model()
 
@@ -483,6 +562,28 @@ def main():
             raise ValueError(f"Body '{name}' not found in planning model.")
         block_ids[name] = bid
 
+    sim_ctx = None
+    if args.sim:
+        data.qpos[arm_idx] = HOME_QPOS
+        data.qvel[arm_idx] = 0.0
+        mj.mj_forward(model, data)
+        v = _mjviewer.launch_passive(model, data)
+        v.cam.distance = 2.5
+        v.cam.azimuth += 90
+        v.sync()
+        sim_ctx = types.SimpleNamespace(
+            model=model, data=data, viewer=v,
+            arm_idx=arm_idx, gripper_idx=7, dt=model.opt.timestep,
+        )
+
+    fa = None
+    if args.real:
+        from frankapy import FrankaArm
+        fa = FrankaArm()
+        fa.reset_joints(duration=MOVE_DURATION)
+        fa.open_gripper()
+    prev_gripper = "open"
+
     server = HTTPServer(('localhost', 5000), _UIHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     rospy.loginfo("UI serving at http://localhost:5000 (source: %s)", _HTML_PATH)
@@ -491,73 +592,88 @@ def main():
     except Exception:
         pass
 
-    fa = FrankaArm()
-    fa.reset_joints(duration=MOVE_DURATION)
-    fa.open_gripper()
-    prev_gripper = "open"
+    try:
+        while not rospy.is_shutdown():
+            rospy.loginfo("Waiting for positions from UI...")
+            while not _start_event.wait(timeout=0.5):
+                if rospy.is_shutdown():
+                    return
+            _start_event.clear()
+            _stop_event.clear()
 
-    while not rospy.is_shutdown():
-        rospy.loginfo("Waiting for positions from UI...")
-        while not _start_event.wait(timeout=0.5):
-            if rospy.is_shutdown():
-                server.shutdown()
-                return
-        _start_event.clear()
-        _stop_event.clear()
+            domino_plan = [(np.array([p['x'], p['y']]), p['yaw']) for p in _ui_positions]
+            if not domino_plan:
+                continue
 
-        domino_plan = [(np.array([p['x'], p['y']]), p['yaw']) for p in _ui_positions]
-        if not domino_plan:
-            continue
+            n = min(len(domino_plan), len(BLOCK_ORDER))
+            if len(domino_plan) > len(BLOCK_ORDER):
+                rospy.logwarn("UI sent %d dominoes; truncating to %d (shelf capacity).",
+                              len(domino_plan), len(BLOCK_ORDER))
 
-        n = min(len(domino_plan), len(BLOCK_ORDER))
-        if len(domino_plan) > len(BLOCK_ORDER):
-            rospy.logwarn("UI sent %d dominoes; truncating to %d (shelf capacity).",
-                          len(domino_plan), len(BLOCK_ORDER))
+            rospy.loginfo("=== Starting %d domino(es) ===", n)
 
-        rospy.loginfo("=== Starting %d domino(es) ===", n)
+            for i in range(n):
+                if _stop_event.is_set():
+                    break
+                block_name = BLOCK_ORDER[i]
+                target_xy, target_yaw = domino_plan[i]
 
-        for i in range(n):
+                rospy.loginfo("[%d/%d] Pick %s from shelf", i + 1, n, block_name)
+                pickup_wps = plan_pickup_waypoints(model, data, arm_idx,
+                                                   block_name, block_ids[block_name])
+                prev_gripper = execute_waypoints(
+                    pickup_wps, sim_ctx=sim_ctx, fa=fa,
+                    prev_gripper_state=prev_gripper,
+                )
+                if sim_ctx is None:
+                    data.qpos[arm_idx] = HOME_QPOS
+                    mj.mj_forward(model, data)
+
+                if _stop_event.is_set():
+                    break
+
+                rospy.loginfo("        Place at xy=(%.3f, %.3f) yaw=%.3f",
+                              target_xy[0], target_xy[1], target_yaw)
+                place_wps = plan_place_domino_standing(
+                    model, data, arm_idx, HOME_QPOS, target_xy, target_yaw
+                )
+                prev_gripper = execute_waypoints(
+                    place_wps, sim_ctx=sim_ctx, fa=fa,
+                    prev_gripper_state=prev_gripper,
+                )
+                if sim_ctx is None:
+                    data.qpos[arm_idx] = HOME_QPOS
+                    mj.mj_forward(model, data)
+
             if _stop_event.is_set():
-                break
-            block_name = BLOCK_ORDER[i]
-            target_xy, target_yaw = domino_plan[i]
+                rospy.logwarn("Stopped — returning home.")
+                if fa is not None:
+                    fa.reset_joints(duration=MOVE_DURATION)
+                    fa.open_gripper()
+                    prev_gripper = "open"
+                if sim_ctx is not None:
+                    _reset_sim_to_home(sim_ctx)
+                continue
 
-            rospy.loginfo("[%d/%d] Pick %s from shelf", i + 1, n, block_name)
-            pickup_wps = plan_pickup_waypoints(model, data, arm_idx,
-                                               block_name, block_ids[block_name])
-            prev_gripper = execute_waypoints(fa, pickup_wps, prev_gripper)
-            data.qpos[arm_idx] = HOME_QPOS
-            mj.mj_forward(model, data)
-
-            if _stop_event.is_set():
-                break
-
-            rospy.loginfo("        Place at xy=(%.3f, %.3f) yaw=%.3f",
-                          target_xy[0], target_xy[1], target_yaw)
-            place_wps = plan_place_domino_standing(
-                model, data, arm_idx, HOME_QPOS, target_xy, target_yaw
+            rospy.loginfo("=== Placements done, knocking first domino ===")
+            first_xy, first_yaw = domino_plan[0]
+            next_xy = domino_plan[1][0] if n >= 2 else None
+            knock_wps = plan_knock_first_domino(
+                model, data, arm_idx, HOME_QPOS, first_xy, first_yaw, next_xy
             )
-            prev_gripper = execute_waypoints(fa, place_wps, prev_gripper)
-            data.qpos[arm_idx] = HOME_QPOS
-            mj.mj_forward(model, data)
+            prev_gripper = execute_waypoints(
+                knock_wps, sim_ctx=sim_ctx, fa=fa,
+                prev_gripper_state=prev_gripper,
+            )
+            rospy.loginfo("=== Chain reaction complete ===")
 
-        if _stop_event.is_set():
-            rospy.logwarn("Stopped — returning home.")
-            fa.reset_joints(duration=MOVE_DURATION)
-            fa.open_gripper()
-            prev_gripper = "open"
-            continue
-
-        rospy.loginfo("=== Placements done, knocking first domino ===")
-        first_xy, first_yaw = domino_plan[0]
-        next_xy = domino_plan[1][0] if n >= 2 else None
-        knock_wps = plan_knock_first_domino(
-            model, data, arm_idx, HOME_QPOS, first_xy, first_yaw, next_xy
-        )
-        prev_gripper = execute_waypoints(fa, knock_wps, prev_gripper)
-        rospy.loginfo("=== Chain reaction complete ===")
-
-    server.shutdown()
+    finally:
+        server.shutdown()
+        if sim_ctx is not None:
+            try:
+                sim_ctx.viewer.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
