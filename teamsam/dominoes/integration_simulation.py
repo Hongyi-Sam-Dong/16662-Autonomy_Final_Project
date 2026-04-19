@@ -3,17 +3,20 @@ import mujoco as mj
 from mujoco import viewer
 import xml.etree.ElementTree as ET
 import time
-import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'teamsam', 'dominoes'))
 import RobotUtil as rt
+import sys
 import threading
 import json as _json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import webbrowser
 
-ROOT_MODEL_XML = "teamsam/franka_emika_panda/panda_torque_table.xml"
-MODEL_XML      = "teamsam/franka_emika_panda/panda_torque_table_final.xml"
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PANDA_DIR  = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', 'franka_emika_panda'))
+_HTML_PATH  = os.path.abspath(os.path.join(_SCRIPT_DIR, '..', 'config', 'visualized.html'))
+
+ROOT_MODEL_XML = os.path.join(_PANDA_DIR, 'panda_torque_table.xml')
+MODEL_XML      = os.path.join(_PANDA_DIR, 'panda_torque_table_final.xml')
 
 KP = np.array([120, 120, 100, 90, 60, 40, 30], dtype=float)
 KD = np.array([  8,   8,   6,  5,  4,  3,  2], dtype=float)
@@ -36,8 +39,7 @@ class _UIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == '/':
-            html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'teamsam', 'config', 'visualized.html')
-            with open(html_path, 'rb') as f:
+            with open(_HTML_PATH, 'rb') as f:
                 body = f.read()
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
