@@ -538,43 +538,208 @@ def _sim_run_segment(ctx, q_start, q_goal, gripper_pos, duration):
         t += ctx.dt
 
 
-def execute_waypoints(waypoints, sim_ctx=None, fa=None, prev_gripper_state="open"):
-    """Drive the selected backends through (joints, gripper_width, duration)
-    waypoints. Sim runs first (preview), then real (execute). Either side is
-    skipped when its context is None. Gripper state machine for the real arm
-    matches runner.py:91-107."""
-    for joints, gripper_width, duration in waypoints:
-        if _is_shutdown() or _stop_event.is_set():
-            return prev_gripper_state
+class IntegrationNode:
+    """Owns both halves of the pickup.py-style service loop in one process:
+      - server: registers /get_next_joint_target, serves 8-float responses
+        (7 joints + gripper width) from a precomputed sequence. Shape matches
+        pickup.py so an external runner.py can drive the arm interchangeably.
+      - client: run_execution_loop() calls the service on each step and waits
+        for fa.goto_joints to return before requesting the next target, so
+        the cadence is arm-feedback-driven just like runner.py.
 
-        joint_goal = list(joints)
+    Duration is not in the service payload (keeps srv unchanged). The client
+    infers it exactly like runner.py:92, extended symmetrically so a
+    closed->open transition at the same joint goal (place release) also gets
+    the short CLAMP_MOVE_DURATION.
 
-        if sim_ctx is not None:
-            q_start  = sim_ctx.data.qpos[sim_ctx.arm_idx].copy()
-            sim_grip = SIM_GRIPPER_OPEN if gripper_width >= OPEN_THRESHOLD else SIM_GRIPPER_CLOSED
-            sim_dur  = SIM_CLAMP_DURATION if duration < 0.2 else duration
-            _sim_run_segment(sim_ctx, q_start, np.asarray(joint_goal, dtype=float),
-                             sim_grip, sim_dur)
-            if _stop_event.is_set():
-                return prev_gripper_state
+    Under --sim only (no rospy) the service path is skipped and the internal
+    client reads self.sequence directly — same state machine either way."""
 
-        if fa is not None:
-            fa.goto_joints(joint_goal, duration=duration)
+    JOINT_TOL = 1e-4
 
-            desired = "open" if gripper_width >= OPEN_THRESHOLD else "closed"
-            if desired != prev_gripper_state:
-                if desired == "open":
-                    fa.open_gripper()
-                else:
-                    fa.close_gripper(grasp=True)
-                    time.sleep(POST_CLAMP_WAIT)
-                prev_gripper_state = desired
+    def __init__(self, model, data, arm_idx, block_ids,
+                 service_name="/get_next_joint_target", use_ros=False):
+        self.model = model
+        self.data = data
+        self.arm_idx = arm_idx
+        self.block_ids = block_ids
+        self.service_name = service_name
+        self.sequence = []
+        self.cursor = 0
+        self._lock = threading.Lock()
+        self._rospy = None
+        self._srv_types = None
+        self._service = None
+        if not use_ros:
+            return
+        try:
+            import rospy
+            from dominoes.srv import (
+                GetNextJointTarget,
+                GetNextJointTargetRequest,
+                GetNextJointTargetResponse,
+            )
+            self._rospy = rospy
+            self._srv_types = (GetNextJointTarget,
+                               GetNextJointTargetRequest,
+                               GetNextJointTargetResponse)
+            self._service = rospy.Service(service_name, GetNextJointTarget,
+                                          self._handle_get_next)
+            _log("IntegrationNode service %s ready", service_name)
+        except Exception as exc:
+            _logwarn("Failed to register %s (%s) — falling back to direct execution",
+                     service_name, exc)
+            self._rospy = None
+            self._srv_types = None
+            self._service = None
 
-            if _is_at_home(joint_goal) and gripper_width >= OPEN_THRESHOLD:
-                fa.open_gripper()
-                prev_gripper_state = "open"
+    def set_plan(self, domino_plan):
+        """Build pickup -> place (per block) -> knock waypoints from the UI
+        plan, pack to 8-float service payloads, reset cursor. Returns the
+        number of dominoes actually planned (truncated to shelf capacity)."""
+        waypoints = []
+        n = min(len(domino_plan), len(BLOCK_ORDER))
+        if n == 0:
+            with self._lock:
+                self.sequence = []
+                self.cursor = 0
+            return 0
+        if len(domino_plan) > len(BLOCK_ORDER):
+            _logwarn("UI sent %d dominoes; truncating to %d (shelf capacity).",
+                     len(domino_plan), len(BLOCK_ORDER))
+        for i in range(n):
+            block_name = BLOCK_ORDER[i]
+            target_xy, target_yaw = domino_plan[i]
+            waypoints.extend(plan_pickup_waypoints(
+                self.model, self.data, self.arm_idx,
+                block_name, self.block_ids[block_name],
+            ))
+            waypoints.extend(plan_place_domino_standing(
+                self.model, self.data, self.arm_idx,
+                HOME_QPOS, target_xy, target_yaw,
+            ))
+        first_xy, first_yaw = domino_plan[0]
+        next_xy = domino_plan[1][0] if n >= 2 else None
+        waypoints.extend(plan_knock_first_domino(
+            self.model, self.data, self.arm_idx,
+            HOME_QPOS, first_xy, first_yaw, next_xy,
+        ))
+        packed = [list(np.asarray(joints, dtype=float).flatten()) + [float(grip)]
+                  for (joints, grip, _duration) in waypoints]
+        with self._lock:
+            self.sequence = packed
+            self.cursor = 0
+        _log("IntegrationNode plan loaded: %d dominoes, %d service steps",
+             n, len(packed))
+        return n
 
-    return prev_gripper_state
+    def _handle_get_next(self, request):
+        _, _, Response = self._srv_types
+        resp = Response()
+        with self._lock:
+            if (not request.next) or (self.cursor >= len(self.sequence)):
+                resp.joints = []
+                return resp
+            resp.joints = self.sequence[self.cursor]
+            self.cursor += 1
+        return resp
+
+    def _next_via_service(self, proxy):
+        """Round-trip through the ROS service. Returns [] when sequence done."""
+        _, Request, _ = self._srv_types
+        try:
+            resp = proxy(Request(next=True))
+        except self._rospy.ServiceException as exc:
+            _logerr("service call failed: %s", exc)
+            return []
+        return list(resp.joints)
+
+    def _next_direct(self):
+        """Fallback when rospy isn't available (sim-only). Same cursor
+        advancement as _handle_get_next but bypasses the ROS round-trip."""
+        with self._lock:
+            if self.cursor >= len(self.sequence):
+                return []
+            item = list(self.sequence[self.cursor])
+            self.cursor += 1
+            return item
+
+    def run_execution_loop(self, fa, sim_ctx, prev_gripper_state="open"):
+        """Drive the selected backends off the service response stream. Cadence
+        is one target per fa.goto_joints completion, matching runner.py."""
+        proxy = None
+        if self._rospy is not None and self._service is not None:
+            GetNextJointTarget = self._srv_types[0]
+            self._rospy.wait_for_service(self.service_name)
+            proxy = self._rospy.ServiceProxy(self.service_name,
+                                             GetNextJointTarget, persistent=True)
+
+        prev_joint_goal = None
+        try:
+            while not _is_shutdown() and not _stop_event.is_set():
+                joints_out = (self._next_via_service(proxy)
+                              if proxy is not None else self._next_direct())
+                if len(joints_out) == 0:
+                    break
+                if len(joints_out) != 8:
+                    _logwarn("expected 8 values from service, got %d; skipping",
+                             len(joints_out))
+                    continue
+
+                joint_goal = [float(x) for x in joints_out[:7]]
+                raw_width = float(joints_out[7])
+                gripper_width = max(0.0, min(GRIPPER_OPEN, raw_width))
+                if gripper_width != raw_width:
+                    _logwarn("clamped gripper %.3f -> %.3f (limit %.2f)",
+                             raw_width, gripper_width, GRIPPER_OPEN)
+
+                desired = "open" if gripper_width >= OPEN_THRESHOLD else "closed"
+                is_gripper_transition = desired != prev_gripper_state
+                joints_unchanged = (
+                    prev_joint_goal is not None
+                    and all(abs(a - b) < self.JOINT_TOL
+                            for a, b in zip(joint_goal, prev_joint_goal))
+                )
+                move_duration = (CLAMP_MOVE_DURATION
+                                 if (is_gripper_transition and joints_unchanged)
+                                 else MOVE_DURATION)
+
+                if sim_ctx is not None:
+                    q_start = sim_ctx.data.qpos[sim_ctx.arm_idx].copy()
+                    sim_grip = (SIM_GRIPPER_OPEN if gripper_width >= OPEN_THRESHOLD
+                                else SIM_GRIPPER_CLOSED)
+                    sim_dur = SIM_CLAMP_DURATION if move_duration < 0.2 else move_duration
+                    _sim_run_segment(sim_ctx, q_start,
+                                     np.asarray(joint_goal, dtype=float),
+                                     sim_grip, sim_dur)
+                    if _stop_event.is_set():
+                        return prev_gripper_state
+
+                if fa is not None:
+                    fa.goto_joints(joint_goal, duration=move_duration)
+                    if is_gripper_transition:
+                        if desired == "open":
+                            fa.open_gripper()
+                        else:
+                            fa.close_gripper(grasp=True)
+                            if self._rospy is not None:
+                                self._rospy.sleep(POST_CLAMP_WAIT)
+                            else:
+                                time.sleep(POST_CLAMP_WAIT)
+                        prev_gripper_state = desired
+                    if _is_at_home(joint_goal) and gripper_width >= OPEN_THRESHOLD:
+                        fa.open_gripper()
+                        prev_gripper_state = "open"
+
+                prev_joint_goal = joint_goal
+        finally:
+            if proxy is not None:
+                try:
+                    proxy.close()
+                except Exception:
+                    pass
+
+        return prev_gripper_state
 
 
 def _parse_args(argv):
@@ -639,6 +804,8 @@ def main():
         fa.open_gripper()
     prev_gripper = "open"
 
+    node = IntegrationNode(model, data, arm_idx, block_ids, use_ros=args.real)
+
     server = HTTPServer(('localhost', 5000), _UIHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     _log("UI serving at http://localhost:5000 (source: %s)", _HTML_PATH)
@@ -660,45 +827,17 @@ def main():
             if not domino_plan:
                 continue
 
-            n = min(len(domino_plan), len(BLOCK_ORDER))
-            if len(domino_plan) > len(BLOCK_ORDER):
-                _logwarn("UI sent %d dominoes; truncating to %d (shelf capacity).",
-                              len(domino_plan), len(BLOCK_ORDER))
+            n = node.set_plan(domino_plan)
+            if n == 0:
+                continue
 
             _log("=== Starting %d domino(es) ===", n)
-
-            for i in range(n):
-                if _stop_event.is_set():
-                    break
-                block_name = BLOCK_ORDER[i]
-                target_xy, target_yaw = domino_plan[i]
-
-                _log("[%d/%d] Pick %s from shelf", i + 1, n, block_name)
-                pickup_wps = plan_pickup_waypoints(model, data, arm_idx,
-                                                   block_name, block_ids[block_name])
-                prev_gripper = execute_waypoints(
-                    pickup_wps, sim_ctx=sim_ctx, fa=fa,
-                    prev_gripper_state=prev_gripper,
-                )
-                if sim_ctx is None:
-                    data.qpos[arm_idx] = HOME_QPOS
-                    mj.mj_forward(model, data)
-
-                if _stop_event.is_set():
-                    break
-
-                _log("        Place at xy=(%.3f, %.3f) yaw=%.3f",
-                              target_xy[0], target_xy[1], target_yaw)
-                place_wps = plan_place_domino_standing(
-                    model, data, arm_idx, HOME_QPOS, target_xy, target_yaw
-                )
-                prev_gripper = execute_waypoints(
-                    place_wps, sim_ctx=sim_ctx, fa=fa,
-                    prev_gripper_state=prev_gripper,
-                )
-                if sim_ctx is None:
-                    data.qpos[arm_idx] = HOME_QPOS
-                    mj.mj_forward(model, data)
+            prev_gripper = node.run_execution_loop(
+                fa, sim_ctx, prev_gripper_state=prev_gripper,
+            )
+            if sim_ctx is None:
+                data.qpos[arm_idx] = HOME_QPOS
+                mj.mj_forward(model, data)
 
             if _stop_event.is_set():
                 _logwarn("Stopped — returning home.")
@@ -710,16 +849,6 @@ def main():
                     _reset_sim_to_home(sim_ctx)
                 continue
 
-            _log("=== Placements done, knocking first domino ===")
-            first_xy, first_yaw = domino_plan[0]
-            next_xy = domino_plan[1][0] if n >= 2 else None
-            knock_wps = plan_knock_first_domino(
-                model, data, arm_idx, HOME_QPOS, first_xy, first_yaw, next_xy
-            )
-            prev_gripper = execute_waypoints(
-                knock_wps, sim_ctx=sim_ctx, fa=fa,
-                prev_gripper_state=prev_gripper,
-            )
             _log("=== Chain reaction complete ===")
 
     finally:
