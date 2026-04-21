@@ -797,9 +797,9 @@ def main():
     fa = None
     if args.real:
         import rospy
-        rospy.init_node("integration_real", anonymous=False)
+        rospy.init_node("integration_real", anonymous=False, disable_signals=True)
         from frankapy import FrankaArm
-        fa = FrankaArm()
+        fa = FrankaArm(init_node=False)
         fa.reset_joints(duration=MOVE_DURATION)
         fa.open_gripper()
     prev_gripper = "open"
