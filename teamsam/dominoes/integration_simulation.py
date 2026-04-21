@@ -365,17 +365,17 @@ if __name__ == "__main__":
 
     block_order = [
         "RBottomFar3",
-        "RBottomClose3",
-        "LBottomClose3",
         "LBottomFar3",
         "RMiddleFar3", "RMiddleFar2", "RMiddleFar1",
-        "RMiddleClose3", "RMiddleClose2", "RMiddleClose1",
         "RTopFar3", "RTopFar2", "RTopFar1",
-        "RTopClose3", "RTopClose2", "RTopClose1",
         "RBottomFar2", "RBottomFar1",
+        "LBottomFar2", "LBottomFar1",
+        "RTopClose3", "RTopClose2", "RTopClose1",
+        "RMiddleClose3", "RMiddleClose2", "RMiddleClose1",
         "RBottomClose2", "RBottomClose1",
         "LBottomClose2", "LBottomClose1",
-        "LBottomFar2", "LBottomFar1",
+        "RBottomClose3",
+        "LBottomClose3",
     ]
 
     try:

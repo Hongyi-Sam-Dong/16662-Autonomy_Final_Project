@@ -45,19 +45,20 @@ HOME_QPOS = WAYPOINTS[0][:7].copy()
 # top block of each stack first to avoid disturbing lower blocks, then works
 # down. Truncated to len(BLOCK_ORDER) if the UI sends more dominoes.
 BLOCK_ORDER = [
-    "RBottomFar3",
-    "RBottomClose3",
-    "LBottomClose3",
-    "LBottomFar3",
-    "RMiddleFar3", "RMiddleFar2", "RMiddleFar1",
-    "RMiddleClose3", "RMiddleClose2", "RMiddleClose1",
-    "RTopFar3", "RTopFar2", "RTopFar1",
-    "RTopClose3", "RTopClose2", "RTopClose1",
-    "RBottomFar2", "RBottomFar1",
-    "RBottomClose2", "RBottomClose1",
-    "LBottomClose2", "LBottomClose1",
-    "LBottomFar2", "LBottomFar1",
-]
+        "RBottomFar3",
+        "RMiddleFar3", "RMiddleFar2", "RMiddleFar1",
+        "RTopFar3", "RTopFar2", "RTopFar1",
+        "RBottomFar2", 
+        "LBottomFar3",
+        "LBottomFar2", "LBottomFar1",
+        "RTopClose3", "RTopClose2", "RTopClose1",
+        "RMiddleClose3", "RMiddleClose2", "RMiddleClose1",
+        "RBottomClose2", "RBottomClose1",
+        "LBottomClose2", "LBottomClose1",
+        "RBottomClose3",
+        "RBottomFar1",
+        "LBottomClose3",
+    ]
 
 END_OF_TABLE = 0.55 + 0.135 + 0.05
 
@@ -65,9 +66,9 @@ GRIPPER_OPEN   = 0.08
 GRIPPER_CLOSED = 0.0
 OPEN_THRESHOLD = GRIPPER_OPEN - 1e-4
 
-MOVE_DURATION       = 3.0
+MOVE_DURATION       = 1.5
 CLAMP_MOVE_DURATION = 0.1
-POST_CLAMP_WAIT     = 0.5
+POST_CLAMP_WAIT     = 0.3
 HOME_TOL            = 1e-2
 
 # Sim-side constants (used only when --sim is active).
@@ -716,7 +717,7 @@ class IntegrationNode:
                         return prev_gripper_state
 
                 if fa is not None:
-                    fa.goto_joints(joint_goal, duration=move_duration)
+                    fa.goto_joints(joint_goal, duration=move_duration, ignore_virtual_walls=True)
                     if is_gripper_transition:
                         if desired == "open":
                             fa.open_gripper()

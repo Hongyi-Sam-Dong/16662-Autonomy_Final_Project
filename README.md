@@ -91,7 +91,7 @@ Keep this running. It brings up the `pickup` node and advertises
 
 ```bash
 rosrun dominoes pickup_client
-```
+```04
 
 The client resets the arm, opens the gripper, then repeatedly calls the
 service. Each response gives 8 floats: `joints[0:7]` are arm joint targets,
@@ -102,7 +102,7 @@ Stop either side with `Ctrl-C`.
 
 ---
 
-## 5. Make mujoco permanent (optional)
+## 5. Make mujoco permanent (optional04)
 
 `run_docker.sh` uses `--rm`, so `pip3 install mujoco` must be re-run every
 time. The `Dockerfile` already contains `RUN pip3 install mujoco`; just

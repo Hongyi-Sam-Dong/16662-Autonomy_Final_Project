@@ -25,7 +25,7 @@ OPEN_THRESHOLD = GRIPPER_MAX - 1e-4
 # Seconds per arm motion (goto_joints / reset_joints). frankapy default is ~5.0;
 # lower = faster. 2.0 is brisk but safe; go below 1.0 only if moves are small,
 # else Franka may reject for velocity/accel limits.
-MOVE_DURATION = 3.0
+MOVE_DURATION = 2.0
 
 # Arm duration used specifically for the clamp step (when transitioning from an
 # open gripper to a closed/grasping one). The server emits grasp_open then
