@@ -1,5 +1,7 @@
 # Dominoes Pickup — Run Guide
 
+Hi, I'm Sam. Food on me!!! For all RI !!!. Taipan!! Let's GO!!!
+
 ROS1 (Noetic) package `dominoes` that plans and executes domino pickups on a
 Franka Panda. A server node advertises `/get_next_joint_target`; a client node
 calls it in a loop and drives the arm through `frankapy`.
