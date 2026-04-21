@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>S-Curve Domino Arrangement Visualizer</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #1a1a1a; color: #fff; font-family: "Segoe UI", Arial, sans-serif; overflow: hidden; }
+        canvas { display: block; }
+
+        #ui-container {
+            position: absolute; top: 12px; left: 12px;
+            background: rgba(18,18,18,0.93); padding: 18px;
+            border-radius: 10px; border: 1px solid #444; width: 280px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.7);
+        }
+
+        h3 {
+            font-size: 15px; color: #4fc3f7; margin-bottom: 14px;
+            padding-bottom: 10px; border-bottom: 1px solid #333; letter-spacing: 0.4px;
+        }
+
+        .mode-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+        .tab-btn {
+            flex: 1; padding: 7px 0; font-size: 12px; font-weight: bold;
+            border: 1px solid #444; border-radius: 5px; cursor: pointer;
+            background: #2a2a2a; color: #888; transition: all 0.15s;
+        }
+        .tab-btn.active { background: #0078d7; color: #fff; border-color: #0078d7; }
+        .tab-btn:hover:not(.active) { background: #333; color: #ccc; }
+
+        .control-group { margin-bottom: 13px; }
+        label { font-size: 12px; color: #bbb; display: block; margin-bottom: 4px; }
+
+        .checkbox-label {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 12px; color: #bbb; cursor: pointer;
+        }
+        .checkbox-label input { accent-color: #0078d7; width: 14px; height: 14px; }
+
+        .slider-row { display: flex; align-items: center; gap: 8px; }
+        input[type="range"] { flex: 1; accent-color: #0078d7; cursor: pointer; height: 4px; }
+        input[type="range"]:disabled { opacity: 0.3; cursor: not-allowed; }
+        .val { min-width: 28px; text-align: right; color: #4fc3f7; font-size: 12px; font-weight: bold; }
+
+        .btn {
+            width: 100%; padding: 9px; background: #0078d7;
+            color: #fff; border: none; border-radius: 6px;
+            cursor: pointer; font-size: 13px; font-weight: bold;
+            margin-top: 4px; transition: background 0.15s;
+        }
+        .btn:hover:not(:disabled) { background: #005fa3; }
+        .btn:active:not(:disabled) { background: #004880; }
+        .btn:disabled { background: #444; cursor: not-allowed; color: #888; }
+        .btn.secondary { background: #333; color: #ccc; }
+        .btn.secondary:hover:not(:disabled) { background: #444; color: #fff; }
+        .btn.danger { background: #6b1a1a; color: #ff8888; }
+        .btn.danger:hover:not(:disabled) { background: #9b2222; color: #fff; }
+        .btn.send { background: #1a6b3a; color: #88ffb8; }
+        .btn.send:hover:not(:disabled) { background: #22a355; color: #fff; }
+
+        #warning {
+            font-size: 11px; color: #ff5a5a; font-weight: bold;
+            margin-top: 9px; padding: 5px 8px;
+            background: rgba(255,50,50,0.1); border: 1px solid #ff5a5a;
+            border-radius: 4px; display: none;
+        }
+        #notice {
+            font-size: 11px; color: #ffb84d; font-weight: bold;
+            margin-top: 6px; padding: 5px 8px;
+            background: rgba(240,165,0,0.08); border: 1px solid rgba(240,165,0,0.5);
+            border-radius: 4px; display: none;
+        }
+        #warning ul, #notice ul {
+            margin: 4px 0 0 16px; padding: 0; font-weight: normal;
+            list-style-type: disc;
+        }
+        #warning li, #notice li { margin: 2px 0; line-height: 1.4; }
+
+        .stat-row {
+            display: flex; justify-content: space-between;
+            font-size: 11px; color: #777; margin-top: 10px;
+            padding-top: 10px; border-top: 1px solid #2e2e2e;
+        }
+        #domino-count { color: #4fc3f7; font-weight: bold; }
+
+        #draw-hint {
+            font-size: 11px; color: #f0a500;
+            background: rgba(240,165,0,0.08);
+            border: 1px solid rgba(240,165,0,0.3);
+            border-radius: 4px; padding: 6px 8px; margin-bottom: 10px; line-height: 1.6;
+        }
+
+        #smooth-level-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+
+        #info-bar {
+            position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+            background: rgba(18,18,18,0.8); padding: 5px 16px;
+            border-radius: 20px; font-size: 11px; color: #666;
+            pointer-events: none; white-space: nowrap;
+        }
+        #view-label {
+            position: absolute; top: 12px; right: 12px;
+            font-size: 11px; color: #555; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<div id="ui-container">
+    <h3>Domino Arrangement Visualizer</h3>
+
+    <div class="mode-tabs">
+        <button class="tab-btn active" id="tab-scurve">S-Curve</button>
+        <button class="tab-btn"        id="tab-draw">Custom Draw</button>
+    </div>
+
+    <!-- S-Curve panel -->
+    <div id="panel-scurve">
+        <div class="control-group">
+            <label class="checkbox-label">
+                <input type="checkbox" id="auto-space">
+                Auto-spacing (collision prevention)
+            </label>
+        </div>
+        <div class="control-group">
+            <label>Domino Count <span style="color:#555">(manual mode only)</span></label>
+            <div class="slider-row">
+                <input type="range" id="num" min="5" max="60" value="18">
+                <span class="val" id="num-val">18</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>Curve Length</label>
+            <div class="slider-row">
+                <input type="range" id="length" min="20" max="80" value="80">
+                <span class="val" id="length-val">80</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>S-Curve Amplitude</label>
+            <div class="slider-row">
+                <input type="range" id="amp" min="5" max="30" value="15">
+                <span class="val" id="amp-val">15</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <label>Curve Rotation (deg)</label>
+            <div class="slider-row">
+                <input type="range" id="rot" min="-180" max="180" value="0">
+                <span class="val" id="rot-val">0°</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Draw panel -->
+    <div id="panel-draw" style="display:none">
+        <div id="draw-hint">
+            ✏️ <strong>Click &amp; drag</strong> to draw a freehand path.<br>
+            Right-drag or middle-drag to pan.
+        </div>
+
+        <div class="control-group">
+            <label class="checkbox-label">
+                <input type="checkbox" id="draw-auto-space">
+                Auto-spacing (collision prevention)
+            </label>
+        </div>
+
+        <div class="control-group">
+            <label>Domino Step Count <span style="color:#555">(manual only)</span></label>
+            <div class="slider-row">
+                <input type="range" id="draw-num" min="2" max="100" value="20">
+                <span class="val" id="draw-num-val">20</span>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label>Smoothing Passes</label>
+            <div class="slider-row">
+                <input type="range" id="smooth-level" min="0" max="10" value="5">
+                <span class="val" id="smooth-val">5</span>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label>Path Rotation (deg)</label>
+            <div class="slider-row">
+                <input type="range" id="draw-rot" min="-180" max="180" value="0">
+                <span class="val" id="draw-rot-val">0°</span>
+            </div>
+        </div>
+
+        <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="btn secondary" id="btn-undo"  style="margin-top:0">↩ Undo</button>
+            <button class="btn danger"    id="btn-clear" style="margin-top:0">✕ Clear</button>
+        </div>
+    </div>
+
+    <button class="btn" id="btn-play">&#9654; Play Placement Animation</button>
+    <button class="btn send"   id="btn-send"  style="margin-top:6px">&#9654; Start Placing</button>
+    <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn danger"    id="btn-stop"  disabled style="margin-top:0;flex:1">⏹ Stop Robot</button>
+        <button class="btn secondary" id="btn-reset" disabled style="margin-top:0;flex:1">↺ Reset</button>
+    </div>
+
+    <div id="warning">&#9888; Collision detected! Spacing too small!</div>
+    <div id="notice"></div>
+
+    <div class="stat-row">
+        <span>Dominoes placed:</span>
+        <span id="domino-count">—</span>
+    </div>
+    <div class="stat-row" style="margin-top:4px;padding-top:4px;border-top:none">
+        <span>Path length:</span>
+        <span id="path-length-stat">—</span>
+    </div>
+    <div class="stat-row" style="margin-top:4px;padding-top:4px;border-top:none">
+        <span>Avg face gap:</span>
+        <span id="path-gap-stat">—</span>
+    </div>
+</div>
+
+<div id="info-bar">Scroll to zoom &nbsp;|&nbsp; Drag to pan</div>
+<div id="view-label">Top-down view</div>
+
+<script>
+    const D_W = 5, D_T = 3;
+    const D_H = 15;                                 // cm, domino height (matches main.py DOMINO_HALF_SIZE[1]*2)
+    const IDEAL_GAP = 7;
+
+    // Workspace center (UI cm). Workspace = [-22.5,22.5] × [-13.5,36.5] → center (0, 11.5).
+    // S-curve is generated around (0,0) then translated to sit at this center.
+    const WS_CENTER_X = 0;
+    const WS_CENTER_Y = 11.5;
+    const CHAIN_RULES = {
+        minCenterDist: D_T + 0.5,                   // error below  → ≥ 3.5 cm center-to-center
+        maxFaceGap:    0.85 * D_H,                  // error above  → face-gap ≥ 12.75 cm (falling tip can't reach)
+        warnFaceGap:   0.55 * D_H,                  // warn  above  → face-gap ≥ 8.25 cm (borderline)
+        maxLateral:    0.5  * D_W,                  // error above  → 2.5 cm off-axis
+        maxYawDegErr:  60,                          // error above  → turn too sharp
+        maxYawDegWarn: 45,                          // warn  above  → borderline turn
+    };
+
+    // --- UI ---
+    const uiAutoSpace     = document.getElementById('auto-space');
+    const uiNum           = document.getElementById('num');
+    const uiLength        = document.getElementById('length');
+    const uiAmp           = document.getElementById('amp');
+    const uiRot           = document.getElementById('rot');
+    const uiDrawAutoSpace = document.getElementById('draw-auto-space');
+    const uiDrawNum       = document.getElementById('draw-num');
+    const uiSmoothLevel   = document.getElementById('smooth-level');
+    const uiDrawRot       = document.getElementById('draw-rot');
+    const uiBtnPlay       = document.getElementById('btn-play');
+    const uiBtnUndo       = document.getElementById('btn-undo');
+    const uiBtnClear      = document.getElementById('btn-clear');
+    const uiWarning       = document.getElementById('warning');
+    const uiNotice        = document.getElementById('notice');
+    const uiCount         = document.getElementById('domino-count');
+    const infoBar         = document.getElementById('info-bar');
+    const panelScurve     = document.getElementById('panel-scurve');
+    const panelDraw       = document.getElementById('panel-draw');
+
+    const disp = {
+        num:      document.getElementById('num-val'),
+        length:   document.getElementById('length-val'),
+        amp:      document.getElementById('amp-val'),
+        rot:      document.getElementById('rot-val'),
+        drawNum:  document.getElementById('draw-num-val'),
+        smooth:   document.getElementById('smooth-val'),
+        drawRot:  document.getElementById('draw-rot-val'),
+    };
+
+    let mode = 'scurve';
+
+    document.getElementById('tab-scurve').addEventListener('click', () => setMode('scurve'));
+    document.getElementById('tab-draw').addEventListener('click',   () => setMode('draw'));
+
+    function setMode(m) {
+        mode = m;
+        document.getElementById('tab-scurve').classList.toggle('active', m === 'scurve');
+        document.getElementById('tab-draw').classList.toggle('active',   m === 'draw');
+        panelScurve.style.display = m === 'scurve' ? '' : 'none';
+        panelDraw.style.display   = m === 'draw'   ? '' : 'none';
+        infoBar.textContent = m === 'draw'
+            ? 'Left-drag: draw path  |  Right/middle-drag: pan  |  Scroll: zoom'
+            : 'Scroll to zoom  |  Drag to pan';
+        canvas.style.cursor = m === 'draw' ? 'crosshair' : 'default';
+        if (!animTimer) refresh();
+    }
+
+    // --- Canvas ---
+    const canvas = document.getElementById('canvas');
+    const ctx    = canvas.getContext('2d');
+    let W, H;
+    let panX = 0, panY = 0, scale = 6;
+
+    function screenToWorld(sx, sy) {
+        return { x: (sx - panX) / scale, y: (sy - panY) / scale };
+    }
+
+    // --- Pan state ---
+    let panActive = false, panBtn = -1;
+    let panSX, panSY, panStartX, panStartY;
+
+    // --- Freehand draw state ---
+    let isDrawing = false;
+    let rawStroke = [];           // points collected during current drag
+    let strokeHistory = [];       // array of smoothed strokes for undo
+    let customPoints = [];        // current active smoothed path
+
+    const MIN_DIST_SQ = 4;        // min squared world-distance between raw samples
+
+    window.addEventListener('resize', () => {
+        W = canvas.width  = window.innerWidth;
+        H = canvas.height = window.innerHeight;
+        panX = W / 2; panY = H / 2;
+        refresh();
+    });
+
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    canvas.addEventListener('mousedown', e => {
+        if (mode === 'draw' && e.button === 0) {
+            // Start freehand drawing
+            isDrawing = true;
+            rawStroke = [screenToWorld(e.clientX, e.clientY)];
+        } else if ((mode === 'scurve' && e.button === 0) ||
+                   (mode === 'draw'   && (e.button === 1 || e.button === 2))) {
+            panActive = true; panBtn = e.button;
+            panSX = e.clientX; panSY = e.clientY;
+            panStartX = panX; panStartY = panY;
+        }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+        if (isDrawing) {
+            const w = screenToWorld(e.clientX, e.clientY);
+            const last = rawStroke[rawStroke.length - 1];
+            const dx = w.x - last.x, dy = w.y - last.y;
+            if (dx*dx + dy*dy >= MIN_DIST_SQ) {
+                rawStroke.push(w);
+                // Live preview while drawing
+                drawScene(rawStroke);
+            }
+        } else if (panActive) {
+            panX = panStartX + (e.clientX - panSX);
+            panY = panStartY + (e.clientY - panSY);
+            if (!animTimer) refresh();
+        }
+    });
+
+    canvas.addEventListener('mouseup', e => {
+        if (isDrawing && e.button === 0) {
+            isDrawing = false;
+            if (rawStroke.length >= 2) {
+                const passes = parseInt(uiSmoothLevel.value);
+                const smoothed = chaikin(downsample(rawStroke, 1.5), passes);
+                strokeHistory.push(customPoints);   // save prev for undo
+                customPoints = smoothed;
+            }
+            rawStroke = [];
+            if (!animTimer) refresh();
+        }
+        if (panActive && e.button === panBtn) panActive = false;
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        panActive = false;
+        if (isDrawing) {
+            isDrawing = false;
+            if (rawStroke.length >= 2) {
+                const passes = parseInt(uiSmoothLevel.value);
+                const smoothed = chaikin(downsample(rawStroke, 1.5), passes);
+                strokeHistory.push(customPoints);
+                customPoints = smoothed;
+            }
+            rawStroke = [];
+            if (!animTimer) refresh();
+        }
+    });
+
+    canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.1 : 0.91;
+        panX = e.clientX + (panX - e.clientX) * factor;
+        panY = e.clientY + (panY - e.clientY) * factor;
+        scale *= factor;
+        if (!animTimer) refresh();
+    }, { passive: false });
+
+    // Undo: restore previous stroke
+    uiBtnUndo.addEventListener('click', () => {
+        if (strokeHistory.length > 0) {
+            customPoints = strokeHistory.pop();
+        } else {
+            customPoints = [];
+        }
+        if (!animTimer) refresh();
+    });
+
+    uiBtnClear.addEventListener('click', () => {
+        customPoints = []; strokeHistory = []; rawStroke = [];
+        if (!animTimer) refresh();
+    });
+
+    // Re-smooth when slider changes (re-apply to last raw → re-apply Chaikin to current smoothed)
+    uiSmoothLevel.addEventListener('input', () => {
+        disp.smooth.innerText = uiSmoothLevel.value;
+        if (!animTimer) refresh();
+    });
+
+    // --- Smoothing: Chaikin corner cutting ---
+    function chaikin(pts, iterations) {
+        if (pts.length < 2) return pts;
+        let result = pts;
+        for (let iter = 0; iter < iterations; iter++) {
+            const next = [result[0]];
+            for (let i = 0; i < result.length - 1; i++) {
+                const a = result[i], b = result[i + 1];
+                next.push({ x: 0.75*a.x + 0.25*b.x, y: 0.75*a.y + 0.25*b.y });
+                next.push({ x: 0.25*a.x + 0.75*b.x, y: 0.25*a.y + 0.75*b.y });
+            }
+            next.push(result[result.length - 1]);
+            result = next;
+        }
+        return result;
+    }
+
+    // Reduce raw points: keep only points farther than minDist apart
+    function downsample(pts, minDist) {
+        if (pts.length === 0) return pts;
+        const out = [pts[0]];
+        for (let i = 1; i < pts.length; i++) {
+            const last = out[out.length - 1];
+            const dx = pts[i].x - last.x, dy = pts[i].y - last.y;
+            if (Math.sqrt(dx*dx + dy*dy) >= minDist) out.push(pts[i]);
+        }
+        if (out[out.length-1] !== pts[pts.length-1]) out.push(pts[pts.length-1]);
+        return out;
+    }
+
+    // --- S-Curve math ---
+    function sCurvePoint(t, L, A, R) {
+        const cx = L * t - L / 2, cy = A * Math.sin(2 * Math.PI * t);
+        const c = Math.cos(R), s = Math.sin(R);
+        return { x: cx*c - cy*s + WS_CENTER_X, y: cx*s + cy*c + WS_CENTER_Y };
+    }
+    function sCurveYaw(t, L, A, R) {
+        return Math.atan((A * 2 * Math.PI * Math.cos(2 * Math.PI * t)) / L) + R;
+    }
+
+    // --- Rotate custom path around its centroid ---
+    function rotatePoints(pts, angle) {
+        if (angle === 0 || pts.length === 0) return pts;
+        let cx = 0, cy = 0;
+        pts.forEach(p => { cx += p.x; cy += p.y; });
+        cx /= pts.length; cy /= pts.length;
+        const cos = Math.cos(angle), sin = Math.sin(angle);
+        return pts.map(p => {
+            const dx = p.x - cx, dy = p.y - cy;
+            return { x: cx + dx*cos - dy*sin, y: cy + dx*sin + dy*cos };
+        });
+    }
+
+    // --- Arc-length parameterization for custom path ---
+    function buildArcTable(pts) {
+        const table = [{ dist: 0, idx: 0 }];
+        let total = 0;
+        for (let i = 1; i < pts.length; i++) {
+            const dx = pts[i].x - pts[i-1].x, dy = pts[i].y - pts[i-1].y;
+            total += Math.sqrt(dx*dx + dy*dy);
+            table.push({ dist: total, idx: i });
+        }
+        return { table, total };
+    }
+
+    function samplePolyline(pts, arc, s) {
+        const { table, total } = arc;
+        s = Math.max(0, Math.min(s, total));
+        let lo = 0, hi = table.length - 1;
+        while (lo < hi - 1) {
+            const mid = (lo + hi) >> 1;
+            table[mid].dist <= s ? (lo = mid) : (hi = mid);
+        }
+        const a = table[lo], b = table[hi];
+        const seg = b.dist - a.dist;
+        const t = seg < 1e-9 ? 0 : (s - a.dist) / seg;
+        const pA = pts[a.idx], pB = pts[b.idx];
+        return {
+            x:   pA.x + (pB.x - pA.x) * t,
+            y:   pA.y + (pB.y - pA.y) * t,
+            yaw: Math.atan2(pB.y - pA.y, pB.x - pA.x),
+        };
+    }
+
+    // --- Path calculation ---
+    function calculatePath() {
+        return mode === 'scurve' ? calcSCurve() : calcCustom();
+    }
+
+    function calcSCurve() {
+        const L = parseFloat(uiLength.value), A = parseFloat(uiAmp.value);
+        const R = parseFloat(uiRot.value) * Math.PI / 180;
+        const auto = uiAutoSpace.checked, N = parseInt(uiNum.value);
+        const pts = [];
+
+        if (auto) {
+            let t = 0, last = sCurvePoint(0, L, A, R);
+            pts.push({ pos: last, yaw: sCurveYaw(0, L, A, R), collision: false });
+            while (t < 1.0) {
+                t += 0.001;
+                const p = sCurvePoint(t, L, A, R);
+                const dx = p.x - last.x, dy = p.y - last.y;
+                if (Math.sqrt(dx*dx + dy*dy) >= IDEAL_GAP) {
+                    pts.push({ pos: p, yaw: sCurveYaw(t, L, A, R), collision: false });
+                    last = p;
+                }
+            }
+            uiWarning.style.display = 'none';
+        } else {
+            for (let i = 0; i < N; i++) {
+                const t = i / (N - 1 || 1);
+                pts.push({ pos: sCurvePoint(t, L, A, R), yaw: sCurveYaw(t, L, A, R), collision: false });
+            }
+            checkCollisions(pts);
+        }
+        return pts;
+    }
+
+    function calcCustom() {
+        if (customPoints.length < 2) { uiWarning.style.display = 'none'; return []; }
+        const R   = parseFloat(uiDrawRot.value) * Math.PI / 180;
+        const pts = rotatePoints(customPoints, R);
+        const arc  = buildArcTable(pts);
+        const auto = uiDrawAutoSpace.checked, N = parseInt(uiDrawNum.value);
+        const result = [];
+        if (auto) {
+            let s = 0, last = samplePolyline(pts, arc, 0);
+            result.push({ pos: { x: last.x, y: last.y }, yaw: last.yaw, collision: false });
+            while (s < arc.total) {
+                s += 0.5;
+                const p = samplePolyline(pts, arc, s);
+                const dx = p.x - last.x, dy = p.y - last.y;
+                if (Math.sqrt(dx*dx + dy*dy) >= IDEAL_GAP) {
+                    result.push({ pos: { x: p.x, y: p.y }, yaw: p.yaw, collision: false });
+                    last = p;
+                }
+            }
+            uiWarning.style.display = 'none';
+        } else {
+            for (let i = 0; i < N; i++) {
+                const s = (i / (N - 1 || 1)) * arc.total;
+                const p = samplePolyline(pts, arc, s);
+                result.push({ pos: { x: p.x, y: p.y }, yaw: p.yaw, collision: false });
+            }
+            checkCollisions(result);
+        }
+        return result;
+    }
+
+    function checkCollisions(pts) {
+        let hasCol = false;
+        for (let i = 0; i < pts.length - 1; i++) {
+            const dx = pts[i+1].pos.x - pts[i].pos.x, dy = pts[i+1].pos.y - pts[i].pos.y;
+            if (Math.sqrt(dx*dx + dy*dy) < 4.0) {
+                pts[i].collision = pts[i+1].collision = true; hasCol = true;
+            }
+        }
+        // Note: #warning display is driven by checkChainLegality() in refresh(),
+        // which supersedes this function's result.
+    }
+
+    // Chain-reaction legality: for each consecutive pair, check that the falling
+    // domino will topple the next one. Returns { errors, warns } lists of
+    // { index, reason } plus marks offending dominoes with collision=true.
+    function checkChainLegality(pts) {
+        const errors = [], warns = [];
+        if (pts.length < 2) return { errors, warns };
+
+        const norm = (a) => {
+            let x = ((a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+            return x;
+        };
+
+        for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i], b = pts[i+1];
+            const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            // Fall direction of domino i: matches drawDomino's local +x after ctx.rotate(yaw).
+            const fx = Math.cos(a.yaw), fy = Math.sin(a.yaw);
+            // Pick the forward-facing side (fall is symmetric: ±fx,±fy both valid).
+            const forwardSigned = dx * fx + dy * fy;
+            const forward = Math.abs(forwardSigned);
+            const lateral = Math.abs(dx * (-fy) + dy * fx);
+            const faceGap = dist - D_T;
+
+            // Yaw delta folded to [-π/2, π/2] (dominoes symmetric mod π).
+            let dyaw = norm(b.yaw - a.yaw);
+            if (dyaw >  Math.PI / 2) dyaw -= Math.PI;
+            if (dyaw < -Math.PI / 2) dyaw += Math.PI;
+            const dyawDeg = Math.abs(dyaw * 180 / Math.PI);
+
+            let linkErr = null, linkWarn = null;
+
+            if (dist < CHAIN_RULES.minCenterDist) {
+                linkErr = `too close (${dist.toFixed(1)} cm — dominoes overlap)`;
+            } else if (forwardSigned === 0 && lateral > 0) {
+                linkErr = `next domino is sideways (forward=0)`;
+            } else if (forward < lateral) {
+                linkErr = `next domino off-axis (lateral ${lateral.toFixed(1)} > forward ${forward.toFixed(1)})`;
+            } else if (lateral > CHAIN_RULES.maxLateral) {
+                linkErr = `lateral offset ${lateral.toFixed(1)} cm > ${CHAIN_RULES.maxLateral} cm`;
+            } else if (faceGap > CHAIN_RULES.maxFaceGap) {
+                linkErr = `gap ${faceGap.toFixed(1)} cm > ${CHAIN_RULES.maxFaceGap.toFixed(1)} cm — falling tip can't reach`;
+            } else if (dyawDeg > CHAIN_RULES.maxYawDegErr) {
+                linkErr = `turn ${dyawDeg.toFixed(0)}° > ${CHAIN_RULES.maxYawDegErr}° — face misses next domino`;
+            } else if (faceGap > CHAIN_RULES.warnFaceGap) {
+                linkWarn = `wide gap ${faceGap.toFixed(1)} cm — cascade may stall`;
+            } else if (dyawDeg > CHAIN_RULES.maxYawDegWarn) {
+                linkWarn = `sharp turn ${dyawDeg.toFixed(0)}° — glancing impact`;
+            }
+
+            if (linkErr)  { errors.push({ index: i, reason: linkErr });  a.collision = b.collision = true; }
+            if (linkWarn) { warns.push({  index: i, reason: linkWarn }); }
+        }
+        return { errors, warns };
+    }
+
+    function renderLegality({ errors, warns }) {
+        const MAX_SHOWN = 5;
+        const buildList = (items, title) => {
+            const shown = items.slice(0, MAX_SHOWN);
+            const extra = items.length - shown.length;
+            const lis = shown.map(e =>
+                `<li>Domino ${e.index+1}→${e.index+2}: ${e.reason}</li>`
+            ).join('');
+            const more = extra > 0 ? `<li>…and ${extra} more</li>` : '';
+            return `${title}<ul>${lis}${more}</ul>`;
+        };
+        if (errors.length > 0) {
+            uiWarning.innerHTML = buildList(errors, '⚠ Chain will NOT cascade:');
+            uiWarning.style.display = 'block';
+        } else {
+            uiWarning.style.display = 'none';
+        }
+        if (warns.length > 0) {
+            uiNotice.innerHTML = buildList(warns, '◈ Marginal links (cascade may stall):');
+            uiNotice.style.display = 'block';
+        } else {
+            uiNotice.style.display = 'none';
+        }
+    }
+
+    // --- Drawing ---
+    let currentPath = [], visibleCount = 0, animTimer = null;
+    let lastLegality = { errors: [], warns: [] };
+
+    function drawScene(liveRaw) {
+        ctx.clearRect(0, 0, W, H);
+        ctx.save();
+        ctx.translate(panX, panY);
+        ctx.scale(scale, scale);
+
+        drawGrid();
+
+        if (mode === 'scurve') {
+            const L = parseFloat(uiLength.value), A = parseFloat(uiAmp.value);
+            const R = parseFloat(uiRot.value) * Math.PI / 180;
+            ctx.beginPath();
+            for (let i = 0; i <= 300; i++) {
+                const p = sCurvePoint(i / 300, L, A, R);
+                i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+            }
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.lineWidth = 1 / scale;
+            ctx.stroke();
+        } else {
+            // Draw live raw stroke (while dragging)
+            if (liveRaw && liveRaw.length >= 2) {
+                ctx.beginPath();
+                liveRaw.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+                ctx.strokeStyle = 'rgba(240,165,0,0.4)';
+                ctx.lineWidth = 1.5 / scale;
+                ctx.setLineDash([3/scale, 2/scale]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // Draw smoothed path (with rotation applied)
+            if (customPoints.length >= 2) {
+                const R = parseFloat(uiDrawRot.value) * Math.PI / 180;
+                const rpts = rotatePoints(customPoints, R);
+                ctx.beginPath();
+                rpts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+                ctx.strokeStyle = 'rgba(240,165,0,0.85)';
+                ctx.lineWidth = 1.5 / scale;
+                ctx.stroke();
+
+                // Start / end markers
+                const s = rpts[0], e = rpts[rpts.length-1];
+                ctx.beginPath(); ctx.arc(s.x, s.y, 2/scale, 0, Math.PI*2);
+                ctx.fillStyle = '#00e676'; ctx.fill();
+                ctx.beginPath(); ctx.arc(e.x, e.y, 2/scale, 0, Math.PI*2);
+                ctx.fillStyle = '#ff5252'; ctx.fill();
+            }
+        }
+
+        // Dominoes
+        for (let i = 0; i < visibleCount && i < currentPath.length; i++) {
+            drawDomino(currentPath[i]);
+        }
+
+        ctx.restore();
+    }
+
+    function drawGrid() {
+        const extent = 120;
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 0.3 / scale;
+        for (let x = -extent; x <= extent; x += 10) {
+            ctx.beginPath(); ctx.moveTo(x, -extent); ctx.lineTo(x, extent); ctx.stroke();
+        }
+        for (let y = -extent; y <= extent; y += 10) {
+            ctx.beginPath(); ctx.moveTo(-extent, y); ctx.lineTo(extent, y); ctx.stroke();
+        }
+        ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+        ctx.lineWidth = 0.5 / scale;
+        ctx.beginPath(); ctx.moveTo(-extent, 0); ctx.lineTo(extent, 0); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, -extent); ctx.lineTo(0, extent); ctx.stroke();
+
+        // 50×45 cm workspace boundary: 45 wide (x), 50 deep (y), near edge 25 cm from arm at ui_y=-38.5
+        const WS_HX = 22.5;               // half width (x): 45 cm
+        const WS_NEAR = -38.5 + 25;       // near edge y = -13.5 (25 cm from arm)
+        const WS_FAR  = WS_NEAR + 50;     // far edge y = 36.5
+        ctx.strokeStyle = 'rgba(80,220,80,0.45)';
+        ctx.lineWidth = 1.2 / scale;
+        ctx.setLineDash([5/scale, 3/scale]);
+        ctx.strokeRect(-WS_HX, WS_NEAR, WS_HX * 2, WS_FAR - WS_NEAR);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(80,220,80,0.55)';
+        ctx.font = `bold ${9/scale}px sans-serif`;
+        ctx.fillText('50×45 cm workspace', -WS_HX + 1.5/scale, WS_NEAR + 11/scale);
+
+        // Robot base position: robot(0,0) → ui_x=0, ui_y = -ROBOT_CX/UI_TO_M = -38.5
+        const robotUIX = 0, robotUIY = -38.5;
+        ctx.beginPath();
+        ctx.arc(robotUIX, robotUIY, 3.5/scale, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff3333';
+        ctx.fill();
+        ctx.strokeStyle = '#ff9999';
+        ctx.lineWidth = 0.6 / scale;
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,100,100,0.8)';
+        ctx.font = `bold ${9/scale}px sans-serif`;
+        ctx.fillText('robot', robotUIX + 5/scale, robotUIY + 3/scale);
+    }
+
+    function drawDomino(pt) {
+        const { pos, yaw, collision } = pt;
+        ctx.save();
+        ctx.translate(pos.x, pos.y);
+        ctx.rotate(yaw);
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 4 / scale;
+        ctx.shadowOffsetX = ctx.shadowOffsetY = 1 / scale;
+        const grad = ctx.createLinearGradient(-D_T/2, -D_W/2, D_T/2, D_W/2);
+        if (collision) { grad.addColorStop(0,'#ff6666'); grad.addColorStop(1,'#cc2222'); }
+        else           { grad.addColorStop(0,'#4fc3f7'); grad.addColorStop(1,'#0288d1'); }
+        ctx.fillStyle = grad;
+        ctx.fillRect(-D_T/2, -D_W/2, D_T, D_W);
+        ctx.shadowColor = 'transparent';
+        ctx.strokeStyle = collision ? '#ff9999' : 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 0.4 / scale;
+        ctx.strokeRect(-D_T/2, -D_W/2, D_T, D_W);
+        ctx.restore();
+    }
+
+    function refresh() {
+        disp.num.innerText     = uiNum.value;
+        disp.length.innerText  = uiLength.value;
+        disp.amp.innerText     = uiAmp.value;
+        disp.rot.innerText     = uiRot.value + '°';
+        disp.drawNum.innerText = uiDrawNum.value;
+        disp.smooth.innerText  = uiSmoothLevel.value;
+        disp.drawRot.innerText = uiDrawRot.value + '°';
+        uiNum.disabled     = uiAutoSpace.checked;
+        uiDrawNum.disabled = uiDrawAutoSpace.checked;
+
+        currentPath  = calculatePath();
+        visibleCount = currentPath.length;
+        uiCount.innerText = currentPath.length || '—';
+
+        // Chain-reaction legality: find pairs that won't cascade and surface them.
+        lastLegality = checkChainLegality(currentPath);
+        renderLegality(lastLegality);
+
+        // Path stats: total length + avg face-to-face gap (domino thickness = D_T = 3 cm)
+        const lenStat = document.getElementById('path-length-stat');
+        const gapStat = document.getElementById('path-gap-stat');
+        if (currentPath.length < 2) {
+            lenStat.innerText = '—'; gapStat.innerText = '—';
+            gapStat.style.color = '';
+        } else {
+            let total = 0;
+            for (let i = 1; i < currentPath.length; i++) {
+                const dx = currentPath[i].pos.x - currentPath[i-1].pos.x;
+                const dy = currentPath[i].pos.y - currentPath[i-1].pos.y;
+                total += Math.sqrt(dx*dx + dy*dy);
+            }
+            const avgCenter = total / (currentPath.length - 1);
+            const avgGap    = avgCenter - D_T;
+            lenStat.innerText = `${total.toFixed(1)} cm`;
+            gapStat.innerText = `${avgGap.toFixed(2)} cm`;
+            gapStat.style.color =
+                avgGap < 1   ? '#ff5a5a' :      // dangerously tight
+                avgGap < 3   ? '#ffb84d' :      // tight for chain reaction
+                               '#4fc3f7';       // healthy
+        }
+
+        drawScene();
+    }
+
+    [uiAutoSpace, uiNum, uiLength, uiAmp, uiRot, uiDrawAutoSpace, uiDrawNum, uiDrawRot]
+        .forEach(el => el.addEventListener('input',  () => { if (!animTimer) refresh(); }));
+    [uiAutoSpace, uiDrawAutoSpace]
+        .forEach(el => el.addEventListener('change', () => { if (!animTimer) refresh(); }));
+
+    uiBtnPlay.addEventListener('click', () => {
+        if (animTimer) return;
+        currentPath  = calculatePath();
+        visibleCount = 0;
+        uiCount.innerText = '0';
+        uiBtnPlay.disabled = true;
+        uiBtnPlay.textContent = '⏳ Animating...';
+        drawScene();
+
+        animTimer = setInterval(() => {
+            visibleCount++;
+            uiCount.innerText = visibleCount;
+            drawScene();
+            if (visibleCount >= currentPath.length) {
+                clearInterval(animTimer); animTimer = null;
+                uiBtnPlay.disabled = false;
+                uiBtnPlay.innerHTML = '&#9654; Play Placement Animation';
+            }
+        }, 80);
+    });
+
+    // Send to Robot
+    // Coordinate mapping: UI units = cm, canvas y-down.
+    // UI convention: robot dot is drawn at world (0, -38.5) — top of canvas.
+    // Therefore canvas +Y (moving DOWN on screen) = moving AWAY from robot (robot_x ↑).
+    //   robot_x = CENTER_X + ui_y * UI_TO_M   (canvas +y → robot +x; away from base)
+    //   robot_y = CENTER_Y + ui_x * UI_TO_M   (canvas +x → robot +y; to robot's left)
+    //   robot_yaw = ui_yaw + π/2              (90° for UI→robot frame rotation)
+    const ROBOT_CX = 0.385, ROBOT_CY = 0.0, UI_TO_M = 0.01;
+
+    document.getElementById('btn-send').addEventListener('click', async () => {
+        const path = calculatePath();
+        if (!path.length) { alert('No dominoes to send!'); return; }
+        const btnSend  = document.getElementById('btn-send');
+        const btnStop  = document.getElementById('btn-stop');
+        const btnReset = document.getElementById('btn-reset');
+
+        // Block send on chain-reaction errors (with a "send anyway" escape for debugging).
+        const legality = checkChainLegality(path);
+        renderLegality(legality);
+        if (legality.errors.length > 0) {
+            const lines = legality.errors.slice(0, 8).map(e =>
+                `• Domino ${e.index+1}→${e.index+2}: ${e.reason}`
+            ).join('\n');
+            const extra = legality.errors.length > 8 ? `\n…and ${legality.errors.length - 8} more` : '';
+            const proceed = confirm(
+                `Chain will NOT cascade (${legality.errors.length} issue(s)):\n\n${lines}${extra}\n\nSend anyway?`
+            );
+            if (!proceed) return;
+        }
+
+        btnSend.disabled = true; btnSend.textContent = '⏳ Sending...';
+
+        // Auto-normalize: only shrink if the path escapes the visible workspace
+        // (the green dashed box drawn in drawGrid). Matches 50×45 cm workspace:
+        // x ∈ [-22.5, 22.5],  y ∈ [-13.5, 36.5] (near edge 25 cm from arm).
+        const WS_XMIN = -22.5, WS_XMAX = 22.5;
+        const WS_YMIN = -13.5, WS_YMAX = 36.5;
+        let bboxMaxX = 0, bboxMaxY = 0;  // worst-case "reach" beyond each edge
+        path.forEach(pt => {
+            if (pt.pos.x >  WS_XMAX) bboxMaxX = Math.max(bboxMaxX,  pt.pos.x / WS_XMAX);
+            if (pt.pos.x <  WS_XMIN) bboxMaxX = Math.max(bboxMaxX,  pt.pos.x / WS_XMIN);
+            if (pt.pos.y >  WS_YMAX) bboxMaxY = Math.max(bboxMaxY,  pt.pos.y / WS_YMAX);
+            if (pt.pos.y <  WS_YMIN) bboxMaxY = Math.max(bboxMaxY,  pt.pos.y / WS_YMIN);
+        });
+        let normScale = 1;
+        const worst = Math.max(bboxMaxX, bboxMaxY);
+        if (worst > 1) {
+            normScale = 1 / worst;
+            console.warn(`Custom path out of workspace — auto-scaling by ${normScale.toFixed(3)}`);
+        }
+
+        // Replace the mapping logic inside the 'btn-send' event listener:
+        const positions = path.map(pt => {
+            // 1. Apply normalization scale
+            const sX = pt.pos.x * normScale;
+            const sY = pt.pos.y * normScale;
+
+            return {
+                // robot_x = CENTER_X + ui_y * UI_TO_M
+                // (canvas +Y = down on screen = away from the red robot dot at ui_y=-38.5)
+                x:   ROBOT_CX + (sY * UI_TO_M),
+                // robot_y = CENTER_Y + ui_x * UI_TO_M  (canvas +X = robot +Y, left side)
+                y:   ROBOT_CY + (sX * UI_TO_M),
+                // robot_yaw: +90° rotates UI frame into robot frame
+                yaw: pt.yaw + Math.PI / 2,
+
+                // Raw UI coords (cm, as drawn in the visualizer) for verification
+                ui_x:   sX,
+                ui_y:   sY,
+                ui_yaw: pt.yaw,
+            };
+        });
+
+        console.log(`Sending ${positions.length} domino positions:`);
+        console.table(positions.map((p, i) => ({
+            '#':      i + 1,
+            'UI_x':   p.ui_x.toFixed(2),
+            'UI_y':   p.ui_y.toFixed(2),
+            'UI_yaw': (p.ui_yaw * 180 / Math.PI).toFixed(1) + '°',
+            'SIM_x':  p.x.toFixed(4),
+            'SIM_y':  p.y.toFixed(4),
+            'SIM_yaw': (p.yaw * 180 / Math.PI).toFixed(1) + '°',
+        })));
+
+        try {
+            await fetch('/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(positions)
+            });
+            btnSend.textContent  = '✓ Robot running...';
+            btnSend.style.background = '#0078d7';
+            btnStop.disabled  = false;
+            btnReset.disabled = false;
+        } catch(e) {
+            btnSend.disabled = false; btnSend.textContent = '&#9654; Start Placing';
+            alert('Start Final_project.py first: ' + e.message);
+        }
+    });
+
+    document.getElementById('btn-stop').addEventListener('click', async () => {
+        try { await fetch('/stop', { method: 'POST' }); } catch(_) {}
+        document.getElementById('btn-stop').textContent = '⏹ Stopped';
+    });
+
+    document.getElementById('btn-reset').addEventListener('click', async () => {
+        try { await fetch('/stop', { method: 'POST' }); } catch(_) {}
+        const btnSend  = document.getElementById('btn-send');
+        const btnStop  = document.getElementById('btn-stop');
+        const btnReset = document.getElementById('btn-reset');
+        btnSend.disabled = false;
+        btnSend.textContent = '&#9654; Start Placing';
+        btnSend.style.background = '';
+        btnStop.disabled  = true;  btnStop.textContent  = '⏹ Stop Robot';
+        btnReset.disabled = true;  btnReset.textContent = '↺ Reset';
+        // clear the domino path for a fresh layout
+        uiBtnClear.click();
+    });
+
+    // Init
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    panX = W / 2; panY = H / 2;
+    refresh();
+</script>
+</body>
+</html>

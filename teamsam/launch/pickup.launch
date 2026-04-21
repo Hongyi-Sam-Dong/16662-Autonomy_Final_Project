@@ -1,0 +1,3 @@
+<launch>
+  <node pkg="dominoes" type="pickup" name="pickup" output="screen"/>
+</launch>
